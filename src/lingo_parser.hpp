@@ -118,7 +118,46 @@ namespace lingo_ast {
         static token make_identifier(const std::string v, const pos_info &pos);
         static token make_string(const std::string v, const pos_info &pos);
         static token make_line_end(const pos_info &pos);
+
+        constexpr bool is_keyword(token_keyword v) const noexcept {
+            return type == TOKEN_KEYWORD && keyword == v;
+        }
+
+        constexpr bool is_symbol(token_symbol v) const noexcept {
+            return type == TOKEN_SYMBOL && symbol == v;
+        }
+
+        constexpr bool is_a(token_type t) const noexcept {
+            return type == t;
+        }
     };
+
+    constexpr const char* token_type_str(token_type type) {
+        switch (type) {
+            case TOKEN_KEYWORD:
+                return "keyword";
+        
+            case TOKEN_SYMBOL:
+                return "symbol";
+        
+            case TOKEN_FLOAT:
+                return "float";
+
+            case TOKEN_INTEGER:
+                return "integer";
+        
+            case TOKEN_IDENTIFIER:
+                return "identifier";
+        
+            case TOKEN_STRING:
+                return "string";
+        
+            case TOKEN_LINE_END:
+                return "newline";
+
+            default: return "???";
+        }
+    }
 
     bool parse_tokens(std::istream &stream, std::vector<token> &tokens,
                       parse_error_s *error);
@@ -264,24 +303,11 @@ namespace lingo_ast {
         std::vector<std::string> identifiers;
     };
 
-    struct ast_script_scope {
-        std::unordered_set<std::string> globals;
-        std::unordered_set<std::string> properties;
-    };
-
-    struct ast_handler_scope {
-        std::unordered_set<std::string> locals;
-        std::unordered_set<std::string> globals;
-
-        std::shared_ptr<ast_script_scope> script_scope;
-    };
-
     struct ast_handler_definition : public ast_statement {
         inline ast_handler_definition() { type = STATEMENT_DEFINE_HANDLER; }
 
         std::string name;
         std::vector<std::string> params;
-        ast_handler_scope scope;
         std::vector<std::unique_ptr<ast_statement>> body;
     };
 
@@ -351,6 +377,6 @@ namespace lingo_ast {
     };
 
     bool parse_ast(const std::vector<token> &tokens,
-                   std::vector<ast_statement> &out_statements,
+                   std::vector<std::unique_ptr<ast_statement>> &out_statements,
                    parse_error_s *error);
 } // namespace lingo_ast

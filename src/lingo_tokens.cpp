@@ -187,7 +187,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
     } parse_mode;
     parse_mode = MODE_NONE;
 
-    char ch = stream.get();
+    char ch = (char)stream.get();
     bool num_is_float = false;
     std::string strbuf;
     token_symbol tmp_symbol = SYMBOL_INVALID;
@@ -201,7 +201,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
             return;
         }
 
-        ch = stream.get();
+        ch = (char)stream.get();
         if (ch == '\n') {
             ++pos.line;
             pos.column = 0;
@@ -226,7 +226,11 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     if (ch == '\n') {
                         if (check_line_cont()) {
                             tokens.pop_back(); // remove line cont token
-                        } else {
+
+                        // don't add a newline token on these conditions:
+                        // 1. it will be the first token in the list
+                        // 2. the last token previously added is also a newline
+                        } else if (tokens.size() > 0 && !tokens.back().is_a(TOKEN_LINE_END)) {
                             tokens.push_back(token::make_line_end(pos));
                         }
                     }
@@ -307,7 +311,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 break;
 
             case MODE_WORD:
-                ch = tolower(ch);
+                ch = (char)tolower((int)ch);
                 if (!(isalnum(ch) || ch == '_')) {
                     wordbuf[wordbuf_i++] = '\0';
 
@@ -371,5 +375,6 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
         }
     }
 
+    tokens.push_back(token::make_line_end(pos));
     return true;
 }
