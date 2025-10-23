@@ -14,6 +14,7 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
     { SYMBOL_LE, "<=" },
     { SYMBOL_GE, ">=" },
     { SYMBOL_NEQUAL, "<>" },
+    { SYMBOL_COMMENT, "--" },
 
     { SYMBOL_COMMA, "," },
     { SYMBOL_PERIOD, "." },
@@ -22,6 +23,7 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
     { SYMBOL_SLASH, "/" },
     { SYMBOL_STAR, "*" },
     { SYMBOL_AMPERSAND, "&" },
+    { SYMBOL_POUND, "#" },
     { SYMBOL_LPAREN, "(" },
     { SYMBOL_RPAREN, ")" },
     { SYMBOL_LBRACKET, "[" },
@@ -220,7 +222,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     wordbuf_i = 0;
                     word_pos = pos;
 
-                    if (isalpha(ch)) {
+                    if (isalpha(ch) || ch == '_') {
                         parse_mode = MODE_WORD;
                     } else if (isdigit(ch)) {
                         parse_mode = MODE_NUMBER;
@@ -234,7 +236,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 break;
 
             case MODE_NUMBER:
-                if (isspace(ch)) {
+                if (!isalnum(ch) && ch != '.') {
                     wordbuf[wordbuf_i++] = '\0';
 
                     if (num_is_float) {
@@ -246,7 +248,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                             if (error)
                                 *error = parse_error_s {
                                     word_pos,
-                                    "could not parse number literal"
+                                    std::string("could not parse number literal ") + wordbuf
                                 };
                             
                             return false;
@@ -265,7 +267,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                             if (error)
                                 *error = parse_error_s {
                                     word_pos,
-                                    "could not parse number literal"
+                                    std::string("could not parse number literal ") + wordbuf
                                 };
                             
                             return false;
@@ -286,7 +288,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 break;
 
             case MODE_WORD:
-                if (!isalnum(ch)) {
+                if (!(isalnum(ch) || ch == '_')) {
                     wordbuf[wordbuf_i++] = '\0';
 
                     token_keyword kw;
@@ -320,7 +322,13 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                         return false;
                     }
 
-                    tokens.push_back(token::make_symbol(tmp_symbol, word_pos));
+                    if (tmp_symbol == SYMBOL_COMMENT) {
+                        // discard rest of line as it is a comment line
+                        while (ch != '\n') next_char();
+                    } else {
+                        tokens.push_back(token::make_symbol(tmp_symbol, word_pos));
+                    }
+
                     parse_mode = MODE_NONE;
                 } else {
                     tmp_symbol = symbol;
@@ -334,10 +342,10 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 if (ch == '"') {
                     tokens.push_back(token::make_string(strbuf, word_pos));
                     parse_mode = MODE_NONE;
-                    next_char();
                 } else {
                     strbuf.push_back(ch);
                 }
+                next_char();
 
                 break;
         }

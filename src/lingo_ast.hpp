@@ -58,12 +58,13 @@ namespace lingo_ast {
         SYMBOL_SLASH, // /
         SYMBOL_STAR, // *
         SYMBOL_AMPERSAND, // &
+        SYMBOL_POUND, // #
         
         SYMBOL_LPAREN, // (
         SYMBOL_RPAREN, // )
         SYMBOL_LBRACKET, // [
         SYMBOL_RBRACKET, // ]
-        SYMBOL_COLON,
+        SYMBOL_COLON, // :
 
         SYMBOL_EQUAL, // = (both assignment and comparison)
         SYMBOL_NEQUAL, // <>
@@ -71,6 +72,7 @@ namespace lingo_ast {
         SYMBOL_GT, // >
         SYMBOL_LE, // <=
         SYMBOL_GE, // >=
+        SYMBOL_COMMENT, // --
 
         SYMBOL_INVALID = UINT8_MAX,
     };
