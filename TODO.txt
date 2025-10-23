@@ -1,0 +1,1 @@
+- are constants TRUE, FALSE, VOID, QUOTE, RETURN, e.t.c. globals or built into the language? (aka keywords)

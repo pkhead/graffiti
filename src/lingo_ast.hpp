@@ -29,6 +29,10 @@ namespace lingo_ast {
         KEYWORD_SWITCH,
         KEYWORD_CASE,
         KEYWORD_OTHERWISE,
+        KEYWORD_THE,
+        KEYWORD_OF,
+        KEYWORD_PUT,
+        KEYWORD_AFTER,
 
         KEYWORD_TYPE,
         KEYWORD_NUMBER,
@@ -72,7 +76,10 @@ namespace lingo_ast {
         SYMBOL_GT, // >
         SYMBOL_LE, // <=
         SYMBOL_GE, // >=
+
+        SYMBOL_DOUBLE_AMPERSAND, // && (concatenates with space)
         SYMBOL_COMMENT, // --
+        SYMBOL_LINE_CONT, // \
 
         SYMBOL_INVALID = UINT8_MAX,
     };

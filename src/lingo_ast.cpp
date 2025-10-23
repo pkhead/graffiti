@@ -15,6 +15,7 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
     { SYMBOL_GE, ">=" },
     { SYMBOL_NEQUAL, "<>" },
     { SYMBOL_COMMENT, "--" },
+    { SYMBOL_DOUBLE_AMPERSAND, "&&" },
 
     { SYMBOL_COMMA, "," },
     { SYMBOL_PERIOD, "." },
@@ -32,6 +33,7 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
     { SYMBOL_EQUAL, "=" },
     { SYMBOL_LT, "<" }, 
     { SYMBOL_GT, ">" },
+    { SYMBOL_LINE_CONT, "\\" },
 };
 
 struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
@@ -48,6 +50,10 @@ struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
     { KEYWORD_SWITCH, "switch" },
     { KEYWORD_CASE, "case" },
     { KEYWORD_OTHERWISE, "otherwise" },
+    { KEYWORD_THE, "the" },
+    { KEYWORD_OF, "of" },
+    { KEYWORD_PUT, "put" },
+    { KEYWORD_AFTER, "after" },
     { KEYWORD_TYPE, "type" },
     { KEYWORD_NUMBER, "number" },
     { KEYWORD_INTEGER, "integer" },
@@ -202,6 +208,13 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
         }
     };
 
+    auto check_line_cont = [&]() {
+        if (tokens.size() == 0) return false;
+
+        token &tok = tokens.back();
+        return tok.type == TOKEN_SYMBOL && tok.symbol == SYMBOL_LINE_CONT;
+    };
+
     while (true) {
         if (stream.eof() && parse_mode == MODE_NONE) break;
 
@@ -209,7 +222,11 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
             case MODE_NONE:
                 if (isspace(ch)) {
                     if (ch == '\n') {
-                        tokens.push_back(token::make_line_end(pos));
+                        if (check_line_cont()) {
+                            tokens.pop_back(); // remove line cont token
+                        } else {
+                            tokens.push_back(token::make_line_end(pos));
+                        }
                     }
                     
                     next_char();
@@ -288,6 +305,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 break;
 
             case MODE_WORD:
+                ch = tolower(ch);
                 if (!(isalnum(ch) || ch == '_')) {
                     wordbuf[wordbuf_i++] = '\0';
 
