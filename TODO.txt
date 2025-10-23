@@ -1,1 +1,38 @@
 - are constants TRUE, FALSE, VOID, QUOTE, RETURN, e.t.c. globals or built into the language? (aka keywords)
+
+unimplemented keywords:
+- char ... of ...
+  char ... to ... of ...
+  a.char[x..y]
+- exit (page 227)
+- exit repeat = break
+- field(...) (page 228)
+- item ... of ...
+  item ... to ... of ...
+  a.item[x..y]
+- line ... of ...
+  line ... to ... of ...
+- next repeat (aka continue)
+- put ... after/before ...
+  put ... into character/word/line X of ... (replaces)
+- repeat while
+  repeat with x = y to z
+  repeat with x = y down to z
+  repeat with var in someList
+- sprite X intersects Y
+  sprite X within Y
+  (or maybe are these actually generic and the pdf is lying)
+- go
+- line X of Y
+  word X of Y (mayeb this exists?)
+  character X or Y (maybe this exists?)
+
+the:
+- moviePath = _movie.path
+- randomSeed
+- frame
+- dirSeparator
+- number of lines/words(?)/characters(?) in X
+
+probably i can identify if it's a "phrase" if there are two identifiers next to
+each other.
