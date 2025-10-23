@@ -1,5 +1,5 @@
 on restrict(val, low, high)
-  if (val < low) then
+  somevar = 35.40 if (val < low) then
     return low
   else if (val > high) then
     return high
