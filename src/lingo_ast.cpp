@@ -1,16 +1,17 @@
-#include "lingo_parser.hpp"
+#include "lingo.hpp"
 #include <sstream>
 #include <stdexcept>
 #include <cassert>
 
-using namespace lingo_ast;
+using namespace lingo;
+using namespace lingo::ast;
 
-class lex_exception : public std::runtime_error {
+class parse_exception : public std::runtime_error {
 public:
     pos_info pos;
     std::string msg;
 
-    lex_exception(pos_info pos, const std::string &what = "")
+    parse_exception(pos_info pos, const std::string &what = "")
         : pos(pos), msg(what), std::runtime_error(what) { } // TODO: add pos info to error
 };
 
@@ -30,21 +31,21 @@ public:
 
     const token& pop() {
         if (eof())
-            throw lex_exception(tokens.back().pos, "Unexpected EOF");
+            throw parse_exception(tokens.back().pos, "Unexpected EOF");
 
         return tokens[index++];
     }
 
     const token& peek() {
         if (eof())
-            throw lex_exception(tokens.back().pos, "Unexpected EOF");
+            throw parse_exception(tokens.back().pos, "Unexpected EOF");
 
         return tokens[index];
     }
 
     const token& peek(int offset) {
         if (index + offset >= tokens.size())
-            throw lex_exception(tokens.back().pos, "Unexpected EOF");
+            throw parse_exception(tokens.back().pos, "Unexpected EOF");
 
         return tokens[index + offset];
     }
@@ -62,7 +63,7 @@ static std::string type_errorstr(token_type desired, token_type got) {
 
 static inline void tok_expect(const token &tok, token_type type) {
     if (tok.type != type) {
-        throw lex_exception(tok.pos, type_errorstr(type, tok.type));
+        throw parse_exception(tok.pos, type_errorstr(type, tok.type));
     }
 }
 
@@ -144,7 +145,7 @@ static std::unique_ptr<ast_statement> parse_script_decl(token_reader &reader) {
                 } else if (paren ? tok->is_symbol(SYMBOL_RPAREN) : tok->is_a(TOKEN_LINE_END)) {
                     break;
                 } else {
-                    throw lex_exception(
+                    throw parse_exception(
                         tok->pos,
                         std::string("unexpected ") + token_type_str(tok->type));
                 }
@@ -177,13 +178,12 @@ static std::unique_ptr<ast_statement> parse_script_decl(token_reader &reader) {
         return std::move(func);
     }
 
-    throw lex_exception(tok->pos, std::string("unexpected ") + token_type_str(tok->type));
+    throw parse_exception(tok->pos, std::string("unexpected ") + token_type_str(tok->type));
     return nullptr;
 }
 
-bool lingo_ast::parse_ast(const std::vector<token> &tokens,
-                          std::vector<std::unique_ptr<ast_statement>> &out_statements,
-                          parse_error_s *error) {
+bool lingo::ast::parse_ast(const std::vector<token> &tokens, ast_root &root,
+                           parse_error *error) {
     token_reader reader(tokens);
 
     try {
@@ -191,11 +191,11 @@ bool lingo_ast::parse_ast(const std::vector<token> &tokens,
             auto decl = parse_script_decl(reader);
             assert(decl);
 
-            out_statements.push_back(std::move(decl));
+            root.push_back(std::move(decl));
         }
-    } catch (lex_exception except) {
+    } catch (parse_exception except) {
         if (error) {
-            *error = parse_error_s { except.pos, except.msg };
+            *error = parse_error { except.pos, except.msg };
         }
 
         return false;

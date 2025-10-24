@@ -4,8 +4,9 @@ project('evillingo', 'cpp',
 
 sources = files(
   'src/main.cpp',
-  'src/lingo_tokens.cpp',
-  'src/lingo_ast.cpp'
+  'src/lingo_lexer.cpp',
+  'src/lingo_ast.cpp',
+  'src/lingo_codegen.cpp',
 )
 
 executable('evillingo',

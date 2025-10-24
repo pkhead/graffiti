@@ -1,4 +1,4 @@
-#include "lingo_parser.hpp"
+#include "lingo.hpp"
 #include <iostream>
 #include <vector>
 #include <cstdint>
@@ -6,7 +6,7 @@
 #include <cstring>
 #include <cassert>
 
-using namespace lingo_ast;
+using namespace lingo::ast;
 
 #define ARRLEN(arr) (sizeof(arr)/sizeof(*arr))
 
@@ -127,7 +127,7 @@ token token::make_line_end(const pos_info &pos) {
     return tok;
 }
 
-const char* lingo_ast::keyword_to_str(token_keyword keyword) {
+const char* lingo::ast::keyword_to_str(token_keyword keyword) {
     for (size_t i = 0; i < ARRLEN(keyword_pairs); ++i) {
         auto pair = keyword_pairs[i];
         if (pair.e == keyword)
@@ -138,7 +138,7 @@ const char* lingo_ast::keyword_to_str(token_keyword keyword) {
     return nullptr;
 }
 
-const char* lingo_ast::symbol_to_str(token_symbol symbol) {
+const char* lingo::ast::symbol_to_str(token_symbol symbol) {
     for (size_t i = 0; i < ARRLEN(symbol_pairs); ++i) {
         auto pair = symbol_pairs[i];
         if (pair.e == symbol)
@@ -172,8 +172,8 @@ static token_symbol identify_symbol(const char *str) {
     return SYMBOL_INVALID;
 }
 
-bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
-                             parse_error_s *error) {
+bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
+                              parse_error *error) {
     char wordbuf[64];
     int wordbuf_i = 0;
     wordbuf[0] = '\0';
@@ -269,7 +269,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                         // conversion failed
                         if (str_end != wordbuf + wordbuf_i - 1) {
                             if (error)
-                                *error = parse_error_s {
+                                *error = parse_error {
                                     word_pos,
                                     std::string("could not parse number literal ") + wordbuf
                                 };
@@ -288,7 +288,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                         // conversion failed
                         if (str_end != wordbuf + wordbuf_i - 1) {
                             if (error)
-                                *error = parse_error_s {
+                                *error = parse_error {
                                     word_pos,
                                     std::string("could not parse number literal ") + wordbuf
                                 };
@@ -338,7 +338,7 @@ bool lingo_ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 if (symbol == SYMBOL_INVALID) {
                     if (tmp_symbol == SYMBOL_INVALID) {
                         if (error)
-                                *error = parse_error_s {
+                                *error = parse_error {
                                     word_pos,
                                     std::string("invalid symbol ") + wordbuf
                                 };

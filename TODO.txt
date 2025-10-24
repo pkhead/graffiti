@@ -1,5 +1,14 @@
 - are constants TRUE, FALSE, VOID, QUOTE, RETURN, e.t.c. globals or built into the language? (aka keywords)
 
+three types of scripts:
+- movie
+    "attached" to the entire movie. handlers defined there are global
+- behavior
+    - attached to a frame, handlers defined there are global to that frame
+    - can also be attached to regular sprites
+- parent
+    - basically a class template i guess. not attached to anything i think.
+
 unimplemented keywords:
 - char ... of ...
   char ... to ... of ...
@@ -36,3 +45,15 @@ the:
 
 probably i can identify if it's a "phrase" if there are two identifiers next to
 each other.
+
+str.chars[x]
+str.char[x]
+
+str.word
+
+str.line
+
+on beginSprite me
+  QUOTE = "test"
+  put QUOTE -- yields "
+end
