@@ -350,7 +350,7 @@ static std::unique_ptr<ast_expr> parse_expression(token_reader &reader,
                 auto inner = parse_expression<0>(reader);
 
                 const token &term = reader.pop();
-                if (!term.is_symbol(SYMBOL_RPAREN)) {
+                if (!term.is_symbol(SYMBOL_RBRACKET)) {
                     throw parse_exception(
                         term.pos,
                         std::string("expected symbol ']', got ") + token_to_str(term)
@@ -451,23 +451,63 @@ static std::unique_ptr<ast_expr> parse_expression(token_reader &reader,
 
 static std::unique_ptr<ast_statement> parse_statement(token_reader &reader) {
     const token *tok = &reader.peek();
-    auto expr = parse_expression(reader, true);
+    pos_info line_pos = tok->pos;
 
-    // assignment
-    if (reader.peek().is_symbol(SYMBOL_EQUAL)) {
-        pos_info pos = reader.pop().pos;
-        auto value_expr = parse_expression(reader);
+    // TODO: global declarations in handlers
+
+    // return statement
+    if (tok->is_keyword(KEYWORD_RETURN)) {
+        reader.pop();
+
+        std::unique_ptr<ast_expr> return_expr;
+        if (!reader.peek().is_a(TOKEN_LINE_END)) {
+            return_expr = parse_expression(reader);
+        }
         tok_expect(reader.pop(), TOKEN_LINE_END);
 
-        auto stm = std::make_unique<ast_statement_assign>();
-        stm->lvalue = std::move(expr);
-        stm->rvalue = std::move(value_expr);
-        stm->pos = pos;
+        auto stm = std::make_unique<ast_statement_return>();
+        stm->pos = line_pos;
+        stm->expr = std::move(return_expr);
+        return stm;
+    
+    } else if (tok->is_keyword(KEYWORD_PUT)) {
+        reader.pop();
+
+        auto expr = parse_expression(reader);
+        std::unique_ptr<ast_expr> source_str;
+        if (reader.peek().is_keyword(KEYWORD_AFTER)) {
+            reader.pop();
+            source_str = parse_expression(reader);
+        }
+
+        tok_expect(reader.pop(), TOKEN_LINE_END);
+
+        auto stm = std::make_unique<ast_statement_put>();
+        stm->pos = line_pos;
+        stm->expr = std::move(expr);
+        stm->target = std::move(source_str);
         return stm;
 
-    // handler invocation
+    // assignment or invocation
     } else {
-        throw parse_exception(tok->pos, "handler invocation statement not impl");
+        auto expr = parse_expression(reader, true);
+
+        // assignment
+        if (reader.peek().is_symbol(SYMBOL_EQUAL)) {
+            reader.pop();
+            auto value_expr = parse_expression(reader);
+            tok_expect(reader.pop(), TOKEN_LINE_END);
+
+            auto stm = std::make_unique<ast_statement_assign>();
+            stm->lvalue = std::move(expr);
+            stm->rvalue = std::move(value_expr);
+            stm->pos = line_pos;
+            return stm;
+
+        // handler invocation
+        } else {
+            throw parse_exception(tok->pos, "handler invocation statement not impl");
+        }
     }
     
     // return nullptr;
@@ -539,7 +579,7 @@ static std::unique_ptr<ast_statement> parse_script_decl(token_reader &reader) {
                 if (paren && tok->is_symbol(SYMBOL_RPAREN)) {
                     break;
                 }
-                
+
                 tok_expect(*tok, TOKEN_IDENTIFIER);
                 func->params.push_back(tok->str);
 
