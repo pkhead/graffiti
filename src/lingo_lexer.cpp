@@ -1,5 +1,6 @@
 #include "lingo.hpp"
 #include <iostream>
+#include <sstream>
 #include <vector>
 #include <cstdint>
 #include <cctype>
@@ -67,9 +68,10 @@ struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
     { KEYWORD_AND, "and" },
     { KEYWORD_OR, "or" },
     { KEYWORD_NOT, "not" },
-    { KEYWORD_TRUE, "true" },
-    { KEYWORD_FALSE, "false" },
-    { KEYWORD_VOID, "void" }
+    { KEYWORD_MOD, "mod" },
+    // { KEYWORD_TRUE, "true" },
+    // { KEYWORD_FALSE, "false" },
+    // { KEYWORD_VOID, "void" }
 };
 
 token token::make_keyword(token_keyword v, const pos_info &pos) {
@@ -147,6 +149,35 @@ const char* lingo::ast::symbol_to_str(token_symbol symbol) {
 
     assert(false && "invalid symbol");
     return nullptr;
+}
+
+std::string lingo::ast::token_to_str(const token &tok) {
+    std::stringstream out;
+    out << token_type_str(tok.type);
+
+    switch (tok.type) {
+        case TOKEN_IDENTIFIER:
+            out << ' ';
+            out << tok.str;
+            break;
+
+        case TOKEN_KEYWORD:
+            out << " '";
+            out << keyword_to_str(tok.keyword);
+            out << "' ";
+            break;
+
+        case TOKEN_SYMBOL:
+            out << " '";
+            out << symbol_to_str(tok.symbol);
+            out << "'";
+            break;
+
+        default:
+            break;
+    }
+
+    return out.str();
 }
 
 static bool identify_keyword(const char *str, token_keyword &kw) {

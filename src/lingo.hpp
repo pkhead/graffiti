@@ -61,10 +61,11 @@ namespace lingo {
             KEYWORD_AND,
             KEYWORD_OR,
             KEYWORD_NOT,
+            KEYWORD_MOD,
 
-            KEYWORD_TRUE,
-            KEYWORD_FALSE,
-            KEYWORD_VOID,
+            // KEYWORD_TRUE,
+            // KEYWORD_FALSE,
+            // KEYWORD_VOID,
         };
 
         enum token_symbol : uint8_t {
@@ -164,6 +165,7 @@ namespace lingo {
 
         const char* keyword_to_str(token_keyword keyword);
         const char* symbol_to_str(token_symbol symbol);
+        std::string token_to_str(const token &tok);
 
         // AST expressions
         enum ast_expr_type : uint8_t {
@@ -182,6 +184,7 @@ namespace lingo {
             EXPR_BINOP_SUB, // X - Y
             EXPR_BINOP_MUL, // X * Y
             EXPR_BINOP_DIV, // X / Y
+            EXPR_BINOP_MOD, // X mod Y
 
             EXPR_BINOP_AND, // X and Y
             EXPR_BINOP_OR, // X or Y
@@ -208,8 +211,15 @@ namespace lingo {
             EXPR_THE_DIR_SEPARATOR,
         };
 
+        enum ast_literal_type : uint8_t {
+            EXPR_LITERAL_FLOAT,
+            EXPR_LITERAL_INTEGER,
+            EXPR_LITERAL_STRING
+        };
+
         struct ast_expr {
             ast_expr_type type;
+            pos_info pos;
         };
 
         struct ast_expr_binop : public ast_expr {
@@ -236,7 +246,12 @@ namespace lingo {
         struct ast_expr_literal : public ast_expr {
             inline ast_expr_literal() { type = EXPR_LITERAL; }
 
-            token tok;
+            ast_literal_type literal_type;
+            std::string str;
+            union {
+                int32_t intv;
+                double floatv;
+            };
         };
 
         struct ast_expr_identifier : public ast_expr {
@@ -290,7 +305,7 @@ namespace lingo {
 
         struct ast_statement {
             ast_statement_type type;
-            int line; // 1-indexed
+            pos_info pos;
         };
 
         struct ast_global_declaration : public ast_statement {

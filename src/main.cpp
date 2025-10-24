@@ -67,8 +67,7 @@ int main(int argc, const char *argv[]) {
         return 1;
     }
 
-    lingo::codegen::generate_lua51(script_tree, std::cout, &error);
-    if (!lingo::ast::parse_ast(tokens, script_tree, &error)) {
+    if (!lingo::codegen::generate_lua51(script_tree, std::cout, &error)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
     }
