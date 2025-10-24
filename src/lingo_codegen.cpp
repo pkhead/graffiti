@@ -15,7 +15,39 @@ public:
         : pos(pos), msg(what), std::runtime_error(what) { } // TODO: add pos info to error
 };
 
-struct var_scope {
+class var_scope {
+private:
+    int tmpvar_index = 0;
+
+    class tmpvar_handle {
+    private:
+        var_scope &scope;
+
+    public:
+        std::string name;
+
+        tmpvar_handle(var_scope &scope, std::ostream &code_stream)
+            : scope(scope), name("_tmp" + std::to_string(scope.tmpvar_index++))
+        {
+            scope.ensure_lua_local(name, code_stream);
+        }
+
+        tmpvar_handle(const tmpvar_handle&) = delete;
+        tmpvar_handle operator=(const tmpvar_handle&) = delete;
+        tmpvar_handle(tmpvar_handle&& src)
+            : scope(src.scope), name(std::move(src.name))
+            { }
+        tmpvar_handle operator=(const tmpvar_handle&& src) {
+            scope = std::move(src.scope);
+            name = std::move(src.name);
+        }
+
+        ~tmpvar_handle() {
+            --scope.tmpvar_index;
+        }
+    };
+
+public:
     enum scope_class {
         SCOPE_GLOBAL,
         SCOPE_PROPERTY,
@@ -76,6 +108,10 @@ struct var_scope {
             lua_locals.insert(name);
             ostream << "local " << name << "\n";
         }
+    }
+
+    tmpvar_handle create_temp_var(std::ostream &ostream) {
+        return tmpvar_handle(*this, ostream);
     }
 };
 
@@ -247,39 +283,51 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                         break;
 
                     case ast::EXPR_BINOP_EQ:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " == ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     case ast::EXPR_BINOP_NEQ:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " ~= ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     case ast::EXPR_BINOP_GT:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " > ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     case ast::EXPR_BINOP_LT:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " < ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     case ast::EXPR_BINOP_GE:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " >= ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     case ast::EXPR_BINOP_LE:
+                        ostream << "btoi(";
                         generate_expr(data->left, ostream, ctx);
                         ostream << " <= ";
                         generate_expr(data->right, ostream, ctx);
+                        ostream << ")";
                         break;
 
                     default:
@@ -424,6 +472,161 @@ static index_split_result object_index_split(
     return INDEX_SPLIT_INVALID;
 }
 
+static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
+                               std::ostream &func_stream,
+                               std::ostream &body_contents, var_scope &scope) {
+    std::stringstream tmp_stream;
+    expr_gen_ctx expr_ctx { scope, body_contents };
+
+    switch (stm->type) {
+        case ast::STATEMENT_ASSIGN: {
+            auto assign = static_cast<ast::ast_statement_assign*>(stm.get());
+
+            // if this is a variable assignment, declare local variable if
+            // it was not already declared
+            if (assign->lvalue->type == ast::EXPR_IDENTIFIER) {
+                auto lvalue = static_cast<ast::ast_expr_identifier*>(assign->lvalue.get());
+                std::string real_var = LOCAL_VAR_PREFIX + lvalue->identifier;
+
+                var_scope::scope_class classif;
+                if (!scope.has_var(lvalue->identifier, classif)) {
+                    // register lingo and lua name of local
+                    scope.locals.insert(lvalue->identifier);
+                    scope.lua_locals.insert(real_var);
+
+                    // insert local declaration at the top of the lua
+                    // function
+                    func_stream << "local ";
+                    func_stream << real_var;
+                    func_stream << "\n";
+                }
+            }
+
+            generate_expr(assign->lvalue, tmp_stream, expr_ctx);
+            tmp_stream << " = ";
+            generate_expr(assign->rvalue, tmp_stream, expr_ctx);
+
+            body_contents << tmp_stream.rdbuf() << "\n";
+            break;
+        }
+
+        case ast::STATEMENT_RETURN: {
+            auto data = static_cast<ast::ast_statement_return*>(stm.get());
+
+            tmp_stream << "return ";
+            generate_expr(data->expr, tmp_stream, expr_ctx);
+
+            body_contents << tmp_stream.rdbuf() << "\n";
+            break;
+        }
+
+        case ast::STATEMENT_PUT: {
+            auto data = static_cast<ast::ast_statement_put*>(stm.get());
+            tmp_stream << "print(";
+            generate_expr(data->expr, tmp_stream, expr_ctx);
+            tmp_stream << ")";
+
+            body_contents << tmp_stream.rdbuf() << "\n";
+            break;
+        }
+
+        case ast::STATEMENT_PUT_ON: {
+            auto data = static_cast<ast::ast_statement_put_on*>(stm.get());
+
+            std::string l, r;
+
+            switch (object_index_split(data->target, expr_ctx, l, r)) {
+                case INDEX_SPLIT_INVALID: {
+                    std::unique_ptr<ast::ast_expr> *expr_left;
+                    std::unique_ptr<ast::ast_expr> *expr_right;
+
+                    if (data->before) {
+                        expr_left = &data->expr;
+                        expr_right = &data->target;
+                    } else {
+                        expr_left = &data->target;
+                        expr_right = &data->expr;
+                    }
+
+                    generate_expr(data->target, tmp_stream, expr_ctx);
+                    tmp_stream << " = ";
+                    generate_expr(*expr_left, tmp_stream, expr_ctx);
+                    tmp_stream << " .. ";
+                    generate_expr(*expr_right, tmp_stream, expr_ctx);
+                    break;
+                }
+
+                case INDEX_SPLIT_STATIC: {
+                    // local _tmp0 = target()
+                    // _tmp0.idx = _tmp0.idx .. expr()
+                    auto tmp0 = expr_ctx.scope.create_temp_var(func_stream);
+                    tmp_stream << tmp0.name << " = " << l << "\n";
+                    tmp_stream << tmp0.name << "." << r << " = ";
+
+                    if (data->before) {
+                        generate_expr(data->expr, tmp_stream, expr_ctx);
+                        tmp_stream << " .. " << tmp0.name << "." << r;
+                    } else {
+                        tmp_stream << " " << tmp0.name << "." << r << " .. ";
+                        generate_expr(data->expr, tmp_stream, expr_ctx);
+                    }
+
+                    break;
+                }
+
+                case INDEX_SPLIT_DYNAMIC: {
+                    // local _tmp0 = target()
+                    // local _tmp1 = index()
+                    // _tmp0[_tmp1] = _tmp0[_tmp1] .. expr()
+                    auto tmp0 = expr_ctx.scope.create_temp_var(func_stream);
+                    auto tmp1 = expr_ctx.scope.create_temp_var(func_stream);
+                    tmp_stream << tmp0.name << " = " << l << " ";
+                    tmp_stream << tmp1.name << " = " << r << "\n";
+
+                    if (data->before) {
+                        tmp_stream << tmp0.name << "[" << tmp1.name << "] = ";
+                        generate_expr(data->expr, tmp_stream, expr_ctx);
+                        tmp_stream << " .. " << tmp0.name << "[" << tmp1.name << "]";
+                    } else {
+                        tmp_stream << tmp0.name << "[" << tmp1.name << "] = "
+                            << tmp0.name << "[" << tmp1.name << "] .. ";
+                        generate_expr(data->expr, tmp_stream, expr_ctx);
+                    }
+
+                    break;
+                }
+            }
+
+            body_contents << tmp_stream.rdbuf() << "\n";
+            break;
+        }
+
+        case ast::STATEMENT_IF: {
+            auto data = static_cast<ast::ast_statement_if*>(stm.get());
+
+            {
+                auto tmp = expr_ctx.scope.create_temp_var(func_stream);
+                tmp_stream << tmp.name << " = ";
+                generate_expr(data->condition, tmp_stream, expr_ctx);
+                tmp_stream << "\nif type(" << tmp.name << ") ~= \"number\" or floor(" << tmp.name << ") ~= " << tmp.name << " then\n";
+                tmp_stream << "\terror(\"expected integer, got \" .. type(" << tmp.name << "))\n";
+                tmp_stream << "end\nif " << tmp.name << " ~= 0 then\n";
+            }
+
+            for (const auto &child_stm : data->body) {
+                generate_statement(child_stm, func_stream, tmp_stream, scope);
+            }
+
+            tmp_stream << "end\n";
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
+        default:
+            throw new gen_exception(stm->pos, "unknown statement type");
+    }
+}
+
 static void generate_func(std::ostream &stream,
                           const ast::ast_handler_definition &handler,
                           var_scope &parent_scope) {
@@ -447,7 +650,6 @@ static void generate_func(std::ostream &stream,
     stream << ")\n";
 
     std::stringstream body_contents;
-    std::stringstream tmp_stream;
 
     // convert lua booleans in parameters to integers, in the case that this
     // handler was called directly from lua
@@ -461,132 +663,7 @@ static void generate_func(std::ostream &stream,
     }
 
     for (auto &stm : handler.body) {
-        tmp_stream.clear();
-        expr_gen_ctx expr_ctx { scope, body_contents };
-
-        switch (stm->type) {
-            case ast::STATEMENT_ASSIGN: {
-                auto assign = static_cast<ast::ast_statement_assign*>(stm.get());
-
-                // if this is a variable assignment, declare local variable if
-                // it was not already declared
-                if (assign->lvalue->type == ast::EXPR_IDENTIFIER) {
-                    auto lvalue = static_cast<ast::ast_expr_identifier*>(assign->lvalue.get());
-                    std::string real_var = LOCAL_VAR_PREFIX + lvalue->identifier;
-
-                    var_scope::scope_class classif;
-                    if (!scope.has_var(lvalue->identifier, classif)) {
-                        // register lingo and lua name of local
-                        scope.locals.insert(lvalue->identifier);
-                        scope.lua_locals.insert(real_var);
-
-                        // insert local declaration at the top of the lua
-                        // function
-                        stream << "local ";
-                        stream << real_var;
-                        stream << "\n";
-                    }
-                }
-
-                generate_expr(assign->lvalue, tmp_stream, expr_ctx);
-                tmp_stream << " = ";
-                generate_expr(assign->rvalue, tmp_stream, expr_ctx);
-
-                body_contents << tmp_stream.rdbuf() << "\n";
-                break;
-            }
-
-            case ast::STATEMENT_RETURN: {
-                auto data = static_cast<ast::ast_statement_return*>(stm.get());
-
-                tmp_stream << "return ";
-                generate_expr(data->expr, tmp_stream, expr_ctx);
-
-                body_contents << tmp_stream.rdbuf() << "\n";
-                break;
-            }
-
-            case ast::STATEMENT_PUT: {
-                auto data = static_cast<ast::ast_statement_put*>(stm.get());
-                tmp_stream << "print(";
-                generate_expr(data->expr, tmp_stream, expr_ctx);
-                tmp_stream << ")";
-
-                body_contents << tmp_stream.rdbuf() << "\n";
-                break;
-            }
-
-            case ast::STATEMENT_PUT_ON: {
-                auto data = static_cast<ast::ast_statement_put_on*>(stm.get());
-
-                std::string l, r;
-
-                switch (object_index_split(data->target, expr_ctx, l, r)) {
-                    case INDEX_SPLIT_INVALID: {
-                        std::unique_ptr<ast::ast_expr> *expr_left;
-                        std::unique_ptr<ast::ast_expr> *expr_right;
-
-                        if (data->before) {
-                            expr_left = &data->expr;
-                            expr_right = &data->target;
-                        } else {
-                            expr_left = &data->target;
-                            expr_right = &data->expr;
-                        }
-
-                        generate_expr(data->target, tmp_stream, expr_ctx);
-                        tmp_stream << " = ";
-                        generate_expr(*expr_left, tmp_stream, expr_ctx);
-                        tmp_stream << " .. ";
-                        generate_expr(*expr_right, tmp_stream, expr_ctx);
-                        break;
-                    }
-
-                    case INDEX_SPLIT_STATIC:
-                        // local _tmp0 = target()
-                        // _tmp0.idx = _tmp0.idx .. expr()
-                        expr_ctx.scope.ensure_lua_local("_tmp0", stream);
-                        tmp_stream << "_tmp0 = " << l << "\n";
-                        tmp_stream << "_tmp0." << r << " = ";
-
-                        if (data->before) {
-                            generate_expr(data->expr, tmp_stream, expr_ctx);
-                            tmp_stream << " .. _tmp0." << r;
-                        } else {
-                            tmp_stream << " _tmp0." << r << " .. ";
-                            generate_expr(data->expr, tmp_stream, expr_ctx);
-                        }
-
-                        break;
-
-                    case INDEX_SPLIT_DYNAMIC:
-                        // local _tmp0 = target()
-                        // local _tmp1 = index()
-                        // _tmp0[_tmp1] = _tmp0[_tmp1] .. expr()
-                        expr_ctx.scope.ensure_lua_local("_tmp0", stream);
-                        expr_ctx.scope.ensure_lua_local("_tmp1", stream);
-                        tmp_stream << "_tmp0 = " << l << " ";
-                        tmp_stream << "_tmp1 = " << r << "\n";
-
-                        if (data->before) {
-                            tmp_stream << "_tmp0[_tmp1] = ";
-                            generate_expr(data->expr, tmp_stream, expr_ctx);
-                            tmp_stream << " .. _tmp0[_tmp1]";
-                        } else {
-                            tmp_stream << "_tmp0[_tmp1] = _tmp0[_tmp1] .. ";
-                            generate_expr(data->expr, tmp_stream, expr_ctx);
-                        }
-
-                        break;
-                }
-
-                body_contents << tmp_stream.rdbuf() << "\n";
-                break;
-            }
-
-            default:
-                throw new gen_exception(stm->pos, "unknown statement type");
-        }
+        generate_statement(stm, stream, body_contents, scope);
     }
 
     if (body_contents.rdbuf()->in_avail()) {
@@ -616,6 +693,7 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
     stream << "local lor = lruntime.logical_or\n";
     stream << "local lnot = lruntime.logical_not\n";
     stream << "local tostring = lruntime.to_string\n";
+    stream << "local btoi = lruntime.bool_to_int\n";
     stream << "\n";
 
     for (auto &gdecl : root) {

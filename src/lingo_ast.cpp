@@ -118,6 +118,7 @@ static std::unique_ptr<ast_expr> parse_expression(token_reader &reader,
             }
 
             left = std::move(tmp);
+            tok = &reader.peek();
         }
 
         return left;
@@ -470,6 +471,7 @@ static std::unique_ptr<ast_statement> parse_statement(token_reader &reader) {
         stm->expr = std::move(return_expr);
         return stm;
     
+    // put statement
     } else if (tok->is_keyword(KEYWORD_PUT)) {
         reader.pop();
 
@@ -518,6 +520,47 @@ static std::unique_ptr<ast_statement> parse_statement(token_reader &reader) {
         }
 
         throw parse_exception(line_pos, "internal error");
+    
+    // if statement
+    } else if (tok->is_keyword(KEYWORD_IF)) {
+        reader.pop();
+
+        auto if_stm = std::make_unique<ast_statement_if>();
+        if_stm->pos = line_pos;
+        if_stm->condition = parse_expression(reader);
+
+        // expect then keyword
+        if (!reader.peek().is_keyword(KEYWORD_THEN)) {
+            throw parse_exception(
+                reader.peek().pos,
+                "expected keyword 'then', got " + token_to_str(reader.peek()));
+        }
+        reader.pop();
+
+        // if not eol, then if statement shoule be of this form:
+        //   if <cond> then <statement>
+        // if eol is present, then it should be of this form:
+        //    if <cond> then
+        //      <block>
+        //    end if
+        if (reader.peek().is_a(TOKEN_LINE_END)) {
+            reader.pop();
+            while (!reader.peek().is_keyword(KEYWORD_END)) {
+                if_stm->body.push_back(parse_statement(reader));
+            }
+
+            // expect end if
+            tok = &reader.pop();
+            if (!reader.pop().is_keyword(KEYWORD_IF)) {
+                throw parse_exception(tok->pos, "expected end if");
+            }
+
+            tok_expect(reader.pop(), TOKEN_LINE_END);
+        } else {
+            if_stm->body.push_back(parse_statement(reader));
+        }
+
+        return if_stm;
 
     // assignment or invocation
     } else {
