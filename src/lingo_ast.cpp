@@ -475,18 +475,49 @@ static std::unique_ptr<ast_statement> parse_statement(token_reader &reader) {
 
         auto expr = parse_expression(reader);
         std::unique_ptr<ast_expr> source_str;
+
+        int append_mode = 0;
         if (reader.peek().is_keyword(KEYWORD_AFTER)) {
+            append_mode = 1;
+            reader.pop();
+            source_str = parse_expression(reader);
+        } else if (reader.peek().is_keyword(KEYWORD_BEFORE)) {
+            append_mode = 2;
             reader.pop();
             source_str = parse_expression(reader);
         }
 
         tok_expect(reader.pop(), TOKEN_LINE_END);
 
-        auto stm = std::make_unique<ast_statement_put>();
-        stm->pos = line_pos;
-        stm->expr = std::move(expr);
-        stm->target = std::move(source_str);
-        return stm;
+        // print
+        if (append_mode == 0) {
+            auto stm = std::make_unique<ast_statement_put>();
+            stm->pos = line_pos;
+            stm->expr = std::move(expr);
+            return stm;
+        }
+
+        // append to end of string
+        if (append_mode == 1) {
+            auto stm = std::make_unique<ast_statement_put_on>();
+            stm->pos = line_pos;
+            stm->expr = std::move(expr);
+            stm->target = std::move(source_str);
+            stm->before = false;
+            return stm;
+        }
+
+        // append to start of string
+        if (append_mode == 2) {
+            auto stm = std::make_unique<ast_statement_put_on>();
+            stm->pos = line_pos;
+            stm->expr = std::move(expr);
+            stm->target = std::move(source_str);
+            stm->before = true;
+            return stm;
+        }
+
+        throw parse_exception(line_pos, "internal error");
 
     // assignment or invocation
     } else {

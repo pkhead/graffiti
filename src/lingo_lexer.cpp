@@ -56,6 +56,7 @@ struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
     { KEYWORD_OF, "of" },
     { KEYWORD_PUT, "put" },
     { KEYWORD_AFTER, "after" },
+    { KEYWORD_BEFORE, "before" },
     { KEYWORD_TYPE, "type" },
     { KEYWORD_NUMBER, "number" },
     { KEYWORD_INTEGER, "integer" },

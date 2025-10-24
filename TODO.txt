@@ -1,8 +1,9 @@
 - are constants TRUE, FALSE, VOID, QUOTE, RETURN, e.t.c. globals or built into the language? (aka keywords)
 - boolean operations don't do short-circuiting
-- TODO: allow drizzle type information (obv ignore it)
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
+
+- TODO: allow drizzle type information (obv ignore it)
 
 three types of scripts:
 - movie
@@ -26,8 +27,8 @@ unimplemented keywords:
 - line ... of ...
   line ... to ... of ...
 - next repeat (aka continue)
-- put ... after/before ...
-  put ... into character/word/line X of ... (replaces)
+- put ... before ... (after is implemented)
+  put ... into char/word/line X of ... (replaces)
 - repeat while
   repeat with x = y to z
   repeat with x = y down to z

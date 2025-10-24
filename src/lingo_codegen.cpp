@@ -508,43 +508,76 @@ static void generate_func(std::ostream &stream,
 
             case ast::STATEMENT_PUT: {
                 auto data = static_cast<ast::ast_statement_put*>(stm.get());
+                tmp_stream << "print(";
+                generate_expr(data->expr, tmp_stream, expr_ctx);
+                tmp_stream << ")";
 
-                if (data->target) {
-                    std::string l, r;
-                    switch (object_index_split(data->target, expr_ctx, l, r)) {
-                        case INDEX_SPLIT_INVALID:
-                            generate_expr(data->target, tmp_stream, expr_ctx);
-                            tmp_stream << " = ";
-                            generate_expr(data->target, tmp_stream, expr_ctx);
-                            tmp_stream << " .. ";
+                body_contents << tmp_stream.rdbuf() << "\n";
+                break;
+            }
+
+            case ast::STATEMENT_PUT_ON: {
+                auto data = static_cast<ast::ast_statement_put_on*>(stm.get());
+
+                std::string l, r;
+
+                switch (object_index_split(data->target, expr_ctx, l, r)) {
+                    case INDEX_SPLIT_INVALID: {
+                        std::unique_ptr<ast::ast_expr> *expr_left;
+                        std::unique_ptr<ast::ast_expr> *expr_right;
+
+                        if (data->before) {
+                            expr_left = &data->expr;
+                            expr_right = &data->target;
+                        } else {
+                            expr_left = &data->target;
+                            expr_right = &data->expr;
+                        }
+
+                        generate_expr(data->target, tmp_stream, expr_ctx);
+                        tmp_stream << " = ";
+                        generate_expr(*expr_left, tmp_stream, expr_ctx);
+                        tmp_stream << " .. ";
+                        generate_expr(*expr_right, tmp_stream, expr_ctx);
+                        break;
+                    }
+
+                    case INDEX_SPLIT_STATIC:
+                        // local _tmp0 = target()
+                        // _tmp0.idx = _tmp0.idx .. expr()
+                        expr_ctx.scope.ensure_lua_local("_tmp0", stream);
+                        tmp_stream << "_tmp0 = " << l << "\n";
+                        tmp_stream << "_tmp0." << r << " = ";
+
+                        if (data->before) {
                             generate_expr(data->expr, tmp_stream, expr_ctx);
-                            break;
-
-                        case INDEX_SPLIT_STATIC:
-                            // local _tmp0 = target()
-                            // _tmp0.idx = _tmp0.idx .. expr()
-                            expr_ctx.scope.ensure_lua_local("_tmp0", stream);
-                            tmp_stream << "_tmp0 = " << l << "\n";
-                            tmp_stream << "_tmp0." << r << " = _tmp0." << r << " .. ";
+                            tmp_stream << " .. _tmp0." << r;
+                        } else {
+                            tmp_stream << " _tmp0." << r << " .. ";
                             generate_expr(data->expr, tmp_stream, expr_ctx);
-                            break;
+                        }
 
-                        case INDEX_SPLIT_DYNAMIC:
-                            // local _tmp0 = target()
-                            // local _tmp1 = index()
-                            // _tmp0[_tmp1] = _tmp0[_tmp1] .. expr()
-                            expr_ctx.scope.ensure_lua_local("_tmp0", stream);
-                            expr_ctx.scope.ensure_lua_local("_tmp1", stream);
-                            tmp_stream << "_tmp0 = " << l << " ";
-                            tmp_stream << "_tmp1 = " << r << "\n";
+                        break;
+
+                    case INDEX_SPLIT_DYNAMIC:
+                        // local _tmp0 = target()
+                        // local _tmp1 = index()
+                        // _tmp0[_tmp1] = _tmp0[_tmp1] .. expr()
+                        expr_ctx.scope.ensure_lua_local("_tmp0", stream);
+                        expr_ctx.scope.ensure_lua_local("_tmp1", stream);
+                        tmp_stream << "_tmp0 = " << l << " ";
+                        tmp_stream << "_tmp1 = " << r << "\n";
+
+                        if (data->before) {
+                            tmp_stream << "_tmp0[_tmp1] = ";
+                            generate_expr(data->expr, tmp_stream, expr_ctx);
+                            tmp_stream << " .. _tmp0[_tmp1]";
+                        } else {
                             tmp_stream << "_tmp0[_tmp1] = _tmp0[_tmp1] .. ";
                             generate_expr(data->expr, tmp_stream, expr_ctx);
-                            break;
-                    }
-                } else {
-                    tmp_stream << "print(";
-                    generate_expr(data->expr, tmp_stream, expr_ctx);
-                    tmp_stream << ")";
+                        }
+
+                        break;
                 }
 
                 body_contents << tmp_stream.rdbuf() << "\n";

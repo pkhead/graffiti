@@ -46,6 +46,7 @@ namespace lingo {
             KEYWORD_OF,
             KEYWORD_PUT,
             KEYWORD_AFTER,
+            KEYWORD_BEFORE,
 
             KEYWORD_TYPE,
             KEYWORD_NUMBER,
@@ -300,6 +301,7 @@ namespace lingo {
             STATEMENT_EXIT_REPEAT, // aka break
             STATEMENT_NEXT_REPEAT, // aka continue
             STATEMENT_PUT,
+            STATEMENT_PUT_ON,
             STATEMENT_SWITCH
         };
 
@@ -390,8 +392,14 @@ namespace lingo {
             inline ast_statement_put() { type = STATEMENT_PUT; }
 
             std::unique_ptr<ast_expr> expr;
-            std::unique_ptr<ast_expr> target; // after X syntax, nullptr if not
-                                              // present.
+        };
+
+        struct ast_statement_put_on : public ast_statement {
+            inline ast_statement_put_on() { type = STATEMENT_PUT_ON; }
+
+            std::unique_ptr<ast_expr> expr;
+            std::unique_ptr<ast_expr> target; // after/before X syntax
+            bool before; // true if before, false if after
         };
 
         typedef std::vector<std::unique_ptr<ast_statement>> ast_root;
