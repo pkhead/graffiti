@@ -892,8 +892,8 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
     stream << "return script\n";
 }
 
-bool codegen::generate_lua51(const ast::ast_root &root, std::ostream &stream,
-                             parse_error *error) {
+bool codegen::generate_luajit_text(const ast::ast_root &root,
+                                   std::ostream &stream, parse_error *error) {
     try {
         generate_script(root, stream);
     } catch (gen_exception except) {
@@ -901,6 +901,77 @@ bool codegen::generate_lua51(const ast::ast_root &root, std::ostream &stream,
             *error = parse_error { except.pos, except.msg };
         }
 
+        return false;
+    }
+
+    return true;
+}
+
+
+
+
+
+
+
+
+
+bool lingo::compile_luajit_text(std::istream &istream, std::ostream &ostream,
+                                parse_error *error) {
+    std::vector<lingo::ast::token> tokens;
+    lingo::parse_error err;
+    if (!lingo::ast::parse_tokens(istream, tokens, &err)) {
+        if (error) *error = err;
+        return false;
+    }
+
+    // for (auto &tok : tokens) {
+    //     switch (tok.type) {
+    //         case lingo::ast::TOKEN_FLOAT:
+    //             std::cout << "(FLT) ";
+    //             std::cout << tok.number;
+    //             break;
+
+    //         case lingo::ast::TOKEN_INTEGER:
+    //             std::cout << "(INT) ";
+    //             std::cout << tok.integer;
+    //             break;
+
+    //         case lingo::ast::TOKEN_KEYWORD:
+    //             std::cout << "(KYW) ";
+    //             std::cout << lingo::ast::keyword_to_str(tok.keyword);
+    //             break;
+
+    //         case lingo::ast::TOKEN_IDENTIFIER:
+    //             std::cout << "(IDN) ";
+    //             std::cout << tok.str;
+    //             break;
+            
+    //         case lingo::ast::TOKEN_SYMBOL:
+    //             std::cout << "(SYM) ";
+    //             std::cout << lingo::ast::symbol_to_str(tok.symbol);
+    //             break;
+
+    //         case lingo::ast::TOKEN_STRING:
+    //             std::cout << "(STR) ";
+    //             std::cout << tok.str;
+    //             break;
+            
+    //         case lingo::ast::TOKEN_LINE_END:
+    //             std::cout << "(NXT) ";
+    //             break;
+    //     }
+
+    //     std::cout << "\n";
+    // }
+
+    lingo::ast::ast_root script_tree;
+    if (!lingo::ast::parse_ast(tokens, script_tree, &err)) {
+        if (error) *error = err;
+        return false;
+    }
+
+    if (!lingo::codegen::generate_luajit_text(script_tree, ostream, &err)) {
+        if (error) *error = err;
         return false;
     }
 

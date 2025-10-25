@@ -1,6 +1,7 @@
 #include "lingo.hpp"
 #include <sstream>
 #include <stdexcept>
+#include <set>
 #include <cassert>
 
 using namespace lingo;

@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <istream>
 #include <vector>
-#include <set>
 #include <memory>
 
 namespace lingo {
@@ -461,7 +460,10 @@ namespace lingo {
     } // namespace ast
 
     namespace codegen {
-        bool generate_lua51(const ast::ast_root &root, std::ostream &stream,
-                            parse_error *error);
+        bool generate_luajit_text(const ast::ast_root &root,
+                                  std::ostream &stream, parse_error *error);
     }
+
+    bool compile_luajit_text(std::istream &istream, std::ostream &ostream,
+                             parse_error *error);
 } // namespace lingo

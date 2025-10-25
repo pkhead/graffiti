@@ -14,9 +14,8 @@ int main(int argc, const char *argv[]) {
         std::cerr << "could not open file " << argv[1] << "\n";
     }
 
-    std::vector<lingo::ast::token> tokens;
     lingo::parse_error error;
-    if (!lingo::ast::parse_tokens(stream, tokens, &error)) {
+    if (!lingo::compile_luajit_text(stream, std::cout, &error)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
     }
@@ -60,17 +59,6 @@ int main(int argc, const char *argv[]) {
 
     //     std::cout << "\n";
     // }
-
-    lingo::ast::ast_root script_tree;
-    if (!lingo::ast::parse_ast(tokens, script_tree, &error)) {
-        std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
-        return 1;
-    }
-
-    if (!lingo::codegen::generate_lua51(script_tree, std::cout, &error)) {
-        std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
-        return 1;
-    }
 
     // auto thing = static_cast<lingo::ast::ast_handler_definition*>(statements[0].get());
     // std::cout << statements.size() << "\n";
