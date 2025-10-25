@@ -24,50 +24,51 @@ namespace lingo {
             TOKEN_SYMBOL,
             TOKEN_FLOAT,
             TOKEN_INTEGER,
-            TOKEN_IDENTIFIER,
+            TOKEN_WORD,
             TOKEN_STRING,
             TOKEN_LINE_END
         };
 
         enum token_keyword : uint8_t {
             KEYWORD_ON,
-            KEYWORD_RETURN,
-            KEYWORD_END,
-            KEYWORD_IF,
             KEYWORD_ELSE,
             KEYWORD_THEN,
-            KEYWORD_REPEAT,
-            KEYWORD_WITH,
-            KEYWORD_TO,
-            KEYWORD_WHILE,
-            KEYWORD_SWITCH,
-            KEYWORD_CASE,
-            KEYWORD_OTHERWISE,
-            KEYWORD_THE,
-            KEYWORD_OF,
-            KEYWORD_PUT,
-            KEYWORD_AFTER,
-            KEYWORD_BEFORE,
-
-            KEYWORD_TYPE,
-            KEYWORD_NUMBER,
-            KEYWORD_INTEGER,
-            KEYWORD_STRING,
-            KEYWORD_POINT,
-            KEYWORD_RECT,
-            KEYWORD_IMAGE,
-
-            KEYWORD_GLOBAL,
-            KEYWORD_PROPERTY,
 
             KEYWORD_AND,
             KEYWORD_OR,
             KEYWORD_NOT,
             KEYWORD_MOD,
+        };
 
-            // KEYWORD_TRUE,
-            // KEYWORD_FALSE,
-            // KEYWORD_VOID,
+        enum token_word_id : uint8_t {
+            WORD_ID_RETURN,
+            WORD_ID_END,
+            WORD_ID_IF,
+            WORD_ID_REPEAT,
+            WORD_ID_WITH,
+            WORD_ID_TO,
+            WORD_ID_WHILE,
+            WORD_ID_SWITCH,
+            WORD_ID_CASE,
+            WORD_ID_OTHERWISE,
+            WORD_ID_THE,
+            WORD_ID_OF,
+            WORD_ID_PUT,
+            WORD_ID_AFTER,
+            WORD_ID_BEFORE,
+
+            WORD_ID_TYPE,
+            WORD_ID_NUMBER,
+            WORD_ID_INTEGER,
+            WORD_ID_STRING,
+            WORD_ID_POINT,
+            WORD_ID_RECT,
+            WORD_ID_IMAGE,
+
+            WORD_ID_GLOBAL,
+            WORD_ID_PROPERTY,
+
+            WORD_ID_UNKNOWN = UINT8_MAX
         };
 
         enum token_symbol : uint8_t {
@@ -110,6 +111,7 @@ namespace lingo {
             union {
                 token_keyword keyword;
                 token_symbol symbol;
+                token_word_id word_id;
                 double number;
                 int32_t integer;
             };
@@ -118,12 +120,17 @@ namespace lingo {
             static token make_integer(int32_t v, const pos_info &pos);
             static token make_symbol(token_symbol v, const pos_info &pos);
             static token make_float(double v, const pos_info &pos);
-            static token make_identifier(const std::string v, const pos_info &pos);
+            static token make_word(const std::string v, const pos_info &pos);
+            static token make_word(token_word_id word_id, const pos_info &pos);
             static token make_string(const std::string v, const pos_info &pos);
             static token make_line_end(const pos_info &pos);
 
             constexpr bool is_keyword(token_keyword v) const noexcept {
                 return type == TOKEN_KEYWORD && keyword == v;
+            }
+
+            constexpr bool is_word(token_word_id v) const noexcept {
+                return type == TOKEN_WORD && word_id == v;
             }
 
             constexpr bool is_symbol(token_symbol v) const noexcept {
@@ -149,8 +156,8 @@ namespace lingo {
                 case TOKEN_INTEGER:
                     return "integer";
             
-                case TOKEN_IDENTIFIER:
-                    return "identifier";
+                case TOKEN_WORD:
+                    return "word";
             
                 case TOKEN_STRING:
                     return "string";
@@ -167,6 +174,7 @@ namespace lingo {
 
         const char* keyword_to_str(token_keyword keyword);
         const char* symbol_to_str(token_symbol symbol);
+        const char* word_id_to_str(token_word_id word_id);
         std::string token_to_str(const token &tok);
 
         // AST expressions

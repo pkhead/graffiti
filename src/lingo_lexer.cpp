@@ -2,6 +2,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 #include <cctype>
 #include <cstring>
@@ -40,32 +41,8 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
 
 struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
     { KEYWORD_ON, "on" },
-    { KEYWORD_RETURN, "return" },
-    { KEYWORD_END, "end" },
-    { KEYWORD_IF, "if" },
     { KEYWORD_ELSE, "else" },
     { KEYWORD_THEN, "then" },
-    { KEYWORD_REPEAT, "repeat" },
-    { KEYWORD_WITH, "with" },
-    { KEYWORD_TO, "to" },
-    { KEYWORD_WHILE, "while" },
-    { KEYWORD_SWITCH, "switch" },
-    { KEYWORD_CASE, "case" },
-    { KEYWORD_OTHERWISE, "otherwise" },
-    { KEYWORD_THE, "the" },
-    { KEYWORD_OF, "of" },
-    { KEYWORD_PUT, "put" },
-    { KEYWORD_AFTER, "after" },
-    { KEYWORD_BEFORE, "before" },
-    { KEYWORD_TYPE, "type" },
-    { KEYWORD_NUMBER, "number" },
-    { KEYWORD_INTEGER, "integer" },
-    { KEYWORD_STRING, "string" },
-    { KEYWORD_POINT, "point" },
-    { KEYWORD_RECT, "rect" },
-    { KEYWORD_IMAGE, "image" },
-    { KEYWORD_GLOBAL, "global" },
-    { KEYWORD_PROPERTY, "property" },
     { KEYWORD_AND, "and" },
     { KEYWORD_OR, "or" },
     { KEYWORD_NOT, "not" },
@@ -73,6 +50,33 @@ struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
     // { KEYWORD_TRUE, "true" },
     // { KEYWORD_FALSE, "false" },
     // { KEYWORD_VOID, "void" }
+};
+
+static const std::unordered_map<std::string, token_word_id> str_to_word_id = {
+    { "return", WORD_ID_RETURN },
+    { "end", WORD_ID_END },
+    { "if", WORD_ID_IF },
+    { "repeat", WORD_ID_REPEAT },
+    { "with", WORD_ID_WITH },
+    { "to", WORD_ID_TO },
+    { "while", WORD_ID_WHILE },
+    { "switch", WORD_ID_SWITCH },
+    { "case", WORD_ID_CASE },
+    { "otherwise", WORD_ID_OTHERWISE },
+    { "the", WORD_ID_THE },
+    { "of", WORD_ID_OF },
+    { "put", WORD_ID_PUT },
+    { "after", WORD_ID_AFTER },
+    { "before", WORD_ID_BEFORE },
+    { "type", WORD_ID_TYPE },
+    { "number", WORD_ID_NUMBER },
+    { "integer", WORD_ID_INTEGER },
+    { "string", WORD_ID_STRING },
+    { "point", WORD_ID_POINT },
+    { "rect", WORD_ID_RECT },
+    { "image", WORD_ID_IMAGE },
+    { "global", WORD_ID_GLOBAL },
+    { "property", WORD_ID_PROPERTY },
 };
 
 token token::make_keyword(token_keyword v, const pos_info &pos) {
@@ -107,11 +111,27 @@ token token::make_float(double v, const pos_info &pos) {
     return tok;
 }
 
-token token::make_identifier(const std::string v, const pos_info &pos) {
+token token::make_word(const std::string v, const pos_info &pos) {
+    token_word_id word_id = WORD_ID_UNKNOWN;
+    const auto &word_id_it = str_to_word_id.find(v);
+    if (word_id_it != str_to_word_id.end()) {
+        word_id = word_id_it->second;
+    }
+
     token tok;
     tok.pos = pos;
-    tok.type = TOKEN_IDENTIFIER;
+    tok.type = TOKEN_WORD;
     tok.str = std::move(v);
+    tok.word_id = word_id;
+    return tok;
+}
+
+token token::make_word(token_word_id word_id, const pos_info &pos) {
+    token tok;
+    tok.pos = pos;
+    tok.type = TOKEN_WORD;
+    tok.str = word_id_to_str(word_id);
+    tok.word_id = word_id;
     return tok;
 }
 
@@ -152,14 +172,27 @@ const char* lingo::ast::symbol_to_str(token_symbol symbol) {
     return nullptr;
 }
 
+const char* lingo::ast::word_id_to_str(token_word_id word_id) {
+    for (auto it = str_to_word_id.begin(); it != str_to_word_id.end(); ++it) {
+        if (it->second == word_id) {
+            return it->first.c_str();
+        }
+    }
+
+    assert(false && "invalid word_id");
+    return nullptr;
+}
+
 std::string lingo::ast::token_to_str(const token &tok) {
     std::stringstream out;
+
     out << token_type_str(tok.type);
 
     switch (tok.type) {
-        case TOKEN_IDENTIFIER:
-            out << ' ';
+        case TOKEN_WORD:
+            out << " '";
             out << tok.str;
+            out << "'";
             break;
 
         case TOKEN_KEYWORD:
@@ -351,7 +384,7 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     if (identify_keyword(wordbuf, kw)) {
                         tokens.push_back(token::make_keyword(kw, word_pos));
                     } else {
-                        tokens.push_back(token::make_identifier(wordbuf, word_pos));
+                        tokens.push_back(token::make_word(wordbuf, word_pos));
                     }
 
                     parse_mode = MODE_NONE;

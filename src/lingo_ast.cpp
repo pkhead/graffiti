@@ -133,6 +133,18 @@ static inline void tok_expect(const token &tok, token_type type) {
     }
 }
 
+static inline void tok_expect(const token &tok, token_word_id word_id) {
+    if (tok.type != TOKEN_WORD || tok.word_id != word_id) {
+        std::stringstream buf;
+        buf << "expected '";
+        buf << word_id_to_str(word_id);
+        buf << "', got ";
+        buf << token_to_str(tok);
+        buf << " instead";
+        throw parse_exception(tok.pos, buf.str());
+    }
+}
+
 template <unsigned int Lv = 0>
 static std::unique_ptr<ast_expr>
 parse_expression(token_reader &reader, parse_ctx &ctx,
@@ -413,7 +425,7 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             
             if (op->is_symbol(SYMBOL_PERIOD)) {
                 const token *id = &reader.pop();
-                tok_expect(*id, TOKEN_IDENTIFIER);
+                tok_expect(*id, TOKEN_WORD);
 
                 auto left = std::make_unique<ast_expr_dot>();
                 left->pos = op->pos;
@@ -463,9 +475,9 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             return expr;
         }
 
-        if (tok.is_keyword(KEYWORD_THE)) {
+        if (tok.is_word(WORD_ID_THE)) {
             const token &id = reader.pop();
-            tok_expect(id, TOKEN_IDENTIFIER);
+            tok_expect(id, TOKEN_WORD);
 
             auto ret = std::make_unique<ast_expr_the>();
             ret->pos = tok.pos;
@@ -485,7 +497,7 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             return ret;
         }
 
-        if (tok.is_a(TOKEN_IDENTIFIER)) {
+        if (tok.is_a(TOKEN_WORD)) {
             // TODO: built-in constants (not done rn because QUOTE = 3 is a valid statement)
             #define MAKE_INT(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_int(tok.pos, v))
             #define MAKE_FLOAT(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_float(tok.pos, v))
@@ -590,8 +602,42 @@ parse_statement(token_reader &reader, handler_scope &scope) {
 
     // TODO: global declarations in handlers
 
+    // variable assignment
+    if (reader.peek( ).is_a(TOKEN_WORD) &&
+        reader.peek(1).is_symbol(SYMBOL_EQUAL))
+    {
+        // pop identifier
+        const auto &id_tok = reader.pop();
+        // pop equals
+        reader.pop();
+
+        auto value_expr = parse_expression(reader, ctx);
+        tok_expect(reader.pop(), TOKEN_LINE_END);
+
+        std::string var_name = id_tok.str;
+
+        // if variable does not exist, then declare a new local variable
+        ast_scope var_scope;
+        if (!scope.has_var(var_name, &var_scope)) {
+            var_scope = SCOPE_LOCAL;
+            scope.locals.insert(var_name);
+        }
+
+        // create statement node
+        auto stm = std::make_unique<ast_statement_assign>();
+        auto id_expr = std::make_unique<ast_expr_identifier>();
+        id_expr->pos = id_tok.pos;
+        id_expr->identifier = var_name;
+        id_expr->scope = var_scope;
+
+        stm->lvalue = std::move(id_expr);
+        stm->rvalue = std::move(value_expr);
+        stm->pos = line_pos;
+
+        return stm;
+    
     // return statement
-    if (tok->is_keyword(KEYWORD_RETURN)) {
+    } else if (tok->is_word(WORD_ID_RETURN)) {
         reader.pop();
 
         std::unique_ptr<ast_expr> return_expr;
@@ -606,18 +652,18 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         return stm;
     
     // put statement
-    } else if (tok->is_keyword(KEYWORD_PUT)) {
+    } else if (tok->is_word(WORD_ID_PUT)) {
         reader.pop();
 
         auto expr = parse_expression(reader, ctx);
         std::unique_ptr<ast_expr> source_str;
 
         int append_mode = 0;
-        if (reader.peek().is_keyword(KEYWORD_AFTER)) {
+        if (reader.peek().is_word(WORD_ID_AFTER)) {
             append_mode = 1;
             reader.pop();
             source_str = parse_expression(reader, ctx);
-        } else if (reader.peek().is_keyword(KEYWORD_BEFORE)) {
+        } else if (reader.peek().is_word(WORD_ID_BEFORE)) {
             append_mode = 2;
             reader.pop();
             source_str = parse_expression(reader, ctx);
@@ -656,7 +702,7 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         throw parse_exception(line_pos, "internal error");
     
     // if statement
-    } else if (tok->is_keyword(KEYWORD_IF)) {
+    } else if (tok->is_word(WORD_ID_IF)) {
         reader.pop();
 
         auto if_stm = std::make_unique<ast_statement_if>();
@@ -679,13 +725,13 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         //    end if
         if (reader.peek().is_a(TOKEN_LINE_END)) {
             reader.pop();
-            while (!reader.peek().is_keyword(KEYWORD_END)) {
+            while (!reader.peek().is_word(WORD_ID_END)) {
                 if_stm->body.push_back(parse_statement(reader, scope));
             }
 
             // expect end if
             tok = &reader.pop();
-            if (!reader.pop().is_keyword(KEYWORD_IF)) {
+            if (!reader.pop().is_word(WORD_ID_IF)) {
                 throw parse_exception(tok->pos, "expected end if");
             }
 
@@ -696,68 +742,29 @@ parse_statement(token_reader &reader, handler_scope &scope) {
 
         return if_stm;
 
-    // assignment or invocation
+    // expression assignment or invocation
     } else {
-        // variable assignment
-        // handled specially so that an undeclared variable error does not
-        // occur...
-        if (reader.peek( ).is_a(TOKEN_IDENTIFIER) &&
-            reader.peek(1).is_symbol(SYMBOL_EQUAL))
-        {
-            // pop identifier
-            const auto &id_tok = reader.pop();
-            // pop equals
+        auto expr = parse_expression(reader, ctx, true);
+
+        // assignment
+        if (reader.peek().is_symbol(SYMBOL_EQUAL)) {
             reader.pop();
-
             auto value_expr = parse_expression(reader, ctx);
-            tok_expect(reader.pop(), TOKEN_LINE_END);
 
-            std::string var_name = id_tok.str;
-
-            // if variable does not exist, then declare a new local variable
-            ast_scope var_scope;
-            if (!scope.has_var(var_name, &var_scope)) {
-                var_scope = SCOPE_LOCAL;
-                scope.locals.insert(var_name);
-            }
-
-            // create statement node
             auto stm = std::make_unique<ast_statement_assign>();
-            auto id_expr = std::make_unique<ast_expr_identifier>();
-            id_expr->pos = id_tok.pos;
-            id_expr->identifier = var_name;
-            id_expr->scope = var_scope;
-
-            stm->lvalue = std::move(id_expr);
+            stm->lvalue = std::move(expr);
             stm->rvalue = std::move(value_expr);
             stm->pos = line_pos;
 
             return stm;
-        
-        // expression assignment
+
+        // handler invocation
+        // it has a special syntax:
+        //   handler_name arg1, arg2, arg3, ...
+        // or you can do the regular
+        //   handler_name(arg1, arg2, arg3, ...)
         } else {
-            auto expr = parse_expression(reader, ctx, true);
-
-            // assignment
-            if (reader.peek().is_symbol(SYMBOL_EQUAL)) {
-                reader.pop();
-                auto value_expr = parse_expression(reader, ctx);
-
-                auto stm = std::make_unique<ast_statement_assign>();
-                stm->lvalue = std::move(expr);
-                stm->rvalue = std::move(value_expr);
-                stm->pos = line_pos;
-
-                return stm;
-
-            // handler invocation
-            // it has a special syntax:
-            //   handler_name arg1, arg2, arg3, ...
-            // or you can do the regular
-            //   handler_name(arg1, arg2, arg3, ...)
-            } else {
-                throw parse_exception(tok->pos, "handler invocation statement not impl");
-            }
+            throw parse_exception(tok->pos, "handler invocation statement not impl");
         }
     }
     
@@ -770,13 +777,13 @@ parse_script_decl(token_reader &reader, script_scope &scope) {
     pos_info stm_pos = tok->pos;
 
     // global or property declarations
-    bool decl_global = tok->is_keyword(KEYWORD_GLOBAL);
-    bool decl_prop = tok->is_keyword(KEYWORD_PROPERTY);
+    bool decl_global = tok->is_word(WORD_ID_GLOBAL);
+    bool decl_prop = tok->is_word(WORD_ID_PROPERTY);
     if (decl_global || decl_prop) {
         std::vector<std::string> ids;
         while (true) {
             tok = &reader.pop();
-            tok_expect(*tok, TOKEN_IDENTIFIER);
+            tok_expect(*tok, TOKEN_WORD);
 
             std::set<std::string> *set;
             const char *err_prefix;
@@ -816,7 +823,7 @@ parse_script_decl(token_reader &reader, script_scope &scope) {
     // method handler header
     } else if (tok->is_keyword(KEYWORD_ON)) {
         tok = &reader.pop();
-        tok_expect(*tok, TOKEN_IDENTIFIER);
+        tok_expect(*tok, TOKEN_WORD);
 
         auto func = std::make_unique<ast_handler_decl>();
         func->name = tok->str;
@@ -842,7 +849,7 @@ parse_script_decl(token_reader &reader, script_scope &scope) {
                     break;
                 }
 
-                tok_expect(*tok, TOKEN_IDENTIFIER);
+                tok_expect(*tok, TOKEN_WORD);
 
                 if (handler_scope.params.find(tok->str) != handler_scope.params.end()) {
                     throw parse_exception(
@@ -877,7 +884,7 @@ parse_script_decl(token_reader &reader, script_scope &scope) {
         tok_expect(reader.pop(), TOKEN_LINE_END);
 
         // read statements
-        while (!reader.peek().is_keyword(KEYWORD_END)) {
+        while (!reader.peek().is_word(WORD_ID_END)) {
             auto stm = parse_statement(reader, handler_scope);
             if (!stm) continue;
 
