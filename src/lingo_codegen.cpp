@@ -45,13 +45,14 @@ private:
         }
 
         tmpvar_handle(const tmpvar_handle&) = delete;
-        tmpvar_handle operator=(const tmpvar_handle&) = delete;
+        tmpvar_handle& operator=(const tmpvar_handle&) = delete;
         tmpvar_handle(tmpvar_handle&& src)
             : scope(src.scope), name(std::move(src.name))
             { }
-        tmpvar_handle operator=(const tmpvar_handle&& src) {
+        tmpvar_handle& operator=(const tmpvar_handle&& src) {
             assert(&scope == &src.scope);
             name = std::move(src.name);
+            return *this;
         }
 
         ~tmpvar_handle() {
