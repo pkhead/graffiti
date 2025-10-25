@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <istream>
 #include <vector>
+#include <set>
 #include <memory>
 
 namespace lingo {
@@ -215,7 +216,14 @@ namespace lingo {
         enum ast_literal_type : uint8_t {
             EXPR_LITERAL_FLOAT,
             EXPR_LITERAL_INTEGER,
-            EXPR_LITERAL_STRING
+            EXPR_LITERAL_STRING,
+            EXPR_LITERAL_VOID
+        };
+
+        enum ast_scope : uint8_t {
+            SCOPE_PROPERTY, // highest precedence
+            SCOPE_GLOBAL,
+            SCOPE_LOCAL,
         };
 
         struct ast_expr {
@@ -253,12 +261,45 @@ namespace lingo {
                 int32_t intv;
                 double floatv;
             };
+
+            static inline ast_expr_literal make_int(pos_info pos, int32_t v) {
+                ast_expr_literal ret;
+                ret.pos = pos;
+                ret.literal_type = EXPR_LITERAL_INTEGER;
+                ret.intv = v;
+                return ret;
+            }
+
+            static inline ast_expr_literal make_float(pos_info pos, double v) {
+                ast_expr_literal ret;
+                ret.pos = pos;
+                ret.literal_type = EXPR_LITERAL_FLOAT;
+                ret.floatv = v;
+                return ret;
+            }
+
+            static inline ast_expr_literal make_string(pos_info pos,
+                                                       const std::string &v) {
+                ast_expr_literal ret;
+                ret.pos = pos;
+                ret.literal_type = EXPR_LITERAL_STRING;
+                ret.str = v;
+                return ret;
+            }
+
+            static inline ast_expr_literal make_void(pos_info pos) {
+                ast_expr_literal ret;
+                ret.pos = pos;
+                ret.literal_type = EXPR_LITERAL_VOID;
+                return ret;
+            }
         };
 
         struct ast_expr_identifier : public ast_expr {
             inline ast_expr_identifier() { type = EXPR_IDENTIFIER; }
 
             std::string identifier;
+            ast_scope scope;
         };
 
         struct ast_expr_dot : public ast_expr {
@@ -285,11 +326,6 @@ namespace lingo {
 
         // AST statements
         enum ast_statement_type : uint8_t {
-            // top-level script statements
-            STATEMENT_DECLARE_GLOBAL, // also usable within handler
-            STATEMENT_DECLARE_PROPERTY,
-            STATEMENT_DEFINE_HANDLER,
-
             // handler statements
             STATEMENT_RETURN,
             STATEMENT_ASSIGN,
@@ -308,26 +344,6 @@ namespace lingo {
         struct ast_statement {
             ast_statement_type type;
             pos_info pos;
-        };
-
-        struct ast_global_declaration : public ast_statement {
-            inline ast_global_declaration()
-                { type = STATEMENT_DECLARE_GLOBAL; }
-            std::vector<std::string> identifiers;
-        };
-
-        struct ast_property_declaration : public ast_statement {
-            inline ast_property_declaration()
-                { type = STATEMENT_DECLARE_PROPERTY; }
-            std::vector<std::string> identifiers;
-        };
-
-        struct ast_handler_definition : public ast_statement {
-            inline ast_handler_definition() { type = STATEMENT_DEFINE_HANDLER; }
-
-            std::string name;
-            std::vector<std::string> params;
-            std::vector<std::unique_ptr<ast_statement>> body;
         };
 
         struct ast_statement_return : public ast_statement {
@@ -402,7 +418,20 @@ namespace lingo {
             bool before; // true if before, false if after
         };
 
-        typedef std::vector<std::unique_ptr<ast_statement>> ast_root;
+        // AST root
+        struct ast_handler_decl {
+            pos_info pos;
+
+            std::string name;
+            std::vector<std::string> params;
+            std::vector<std::unique_ptr<ast_statement>> body;
+            std::vector<std::string> locals;
+        };
+
+        struct ast_root {
+            std::vector<std::string> properties;
+            std::vector<std::unique_ptr<ast_handler_decl>> handlers;
+        };
 
         bool parse_ast(const std::vector<token> &tokens, ast_root &root,
                        parse_error *error);

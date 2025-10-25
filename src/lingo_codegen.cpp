@@ -15,18 +15,30 @@ public:
         : pos(pos), msg(what), std::runtime_error(what) { } // TODO: add pos info to error
 };
 
-class var_scope {
+class gen_script_scope {
+public:
+    std::unordered_set<std::string> handlers; // stores script-scope handlers
+
+    bool has_handler(const std::string &id) const {
+        if (handlers.find(id) != handlers.end())
+            return true;
+
+        return false;
+    }
+};
+
+class gen_handler_scope {
 private:
     int tmpvar_index = 0;
 
     class tmpvar_handle {
     private:
-        var_scope &scope;
+        gen_handler_scope &scope;
 
     public:
         std::string name;
 
-        tmpvar_handle(var_scope &scope, std::ostream &code_stream)
+        tmpvar_handle(gen_handler_scope &scope, std::ostream &code_stream)
             : scope(scope), name("_tmp" + std::to_string(scope.tmpvar_index++))
         {
             scope.ensure_lua_local(name, code_stream);
@@ -38,7 +50,7 @@ private:
             : scope(src.scope), name(std::move(src.name))
             { }
         tmpvar_handle operator=(const tmpvar_handle&& src) {
-            scope = std::move(src.scope);
+            assert(&scope == &src.scope);
             name = std::move(src.name);
         }
 
@@ -48,59 +60,12 @@ private:
     };
 
 public:
-    enum scope_class {
-        SCOPE_GLOBAL,
-        SCOPE_PROPERTY,
-        SCOPE_LOCAL
-    };
-
-    std::unordered_set<std::string> globals;
-    std::unordered_set<std::string> properties;
-    std::unordered_set<std::string> locals;
-    std::unordered_set<std::string> handlers; // stores script-scope handlers
+    gen_script_scope &script_scope;
     std::unordered_set<std::string> lua_locals;
-    var_scope *parent_scope;
 
-    bool has_var(const std::string &id, scope_class &classif) const {
-        {
-            auto it = globals.find(id);
-            if (it != globals.end()) {
-                classif = SCOPE_GLOBAL;
-                return true;
-            }
-        }
-
-        {
-            auto it = properties.find(id);
-            if (it != properties.end()) {
-                classif = SCOPE_PROPERTY;
-                return true;
-            }
-        }
-
-        {
-            auto it = locals.find(id);
-            if (it != locals.end()) {
-                classif = SCOPE_LOCAL;
-                return true;
-            }
-        }
-
-        if (parent_scope)
-            return parent_scope->has_var(id, classif);
-        else
-            return false;
-    }
-
-    bool has_handler(const std::string &id) const {
-        if (handlers.find(id) != handlers.end())
-            return true;
-
-        if (parent_scope)
-            return parent_scope->has_handler(id);
-        else
-            return false;
-    }
+    gen_handler_scope(gen_script_scope &script_scope)
+        : script_scope(script_scope)
+        { }
 
     inline void ensure_lua_local(const std::string &name,
                                  std::ostream &ostream) {
@@ -116,7 +81,7 @@ public:
 };
 
 struct expr_gen_ctx {
-    var_scope &scope;
+    gen_handler_scope &scope;
     std::ostream &decl_stream;
 };
 
@@ -169,7 +134,7 @@ static bool get_handler_ref(const std::string &name, std::ostream &ostream,
         }
     }
     
-    if (ctx.scope.has_handler(name)) {
+    if (ctx.scope.script_scope.has_handler(name)) {
         ostream << "script." << name;
         return true;
     }
@@ -178,8 +143,7 @@ static bool get_handler_ref(const std::string &name, std::ostream &ostream,
 }
 
 static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
-                          std::ostream &ostream, expr_gen_ctx &ctx,
-                          bool assign = false) {
+                          std::ostream &ostream, expr_gen_ctx &ctx) {
     switch (expr->type) {
         case ast::EXPR_LITERAL: {
             auto data = static_cast<ast::ast_expr_literal*>(expr.get());
@@ -196,6 +160,10 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                 case ast::EXPR_LITERAL_STRING:
                     write_escaped_str(data->str, ostream);
                     break;
+                
+                case ast::EXPR_LITERAL_VOID:
+                    ostream << "null";
+                    break;
             }
 
             break;
@@ -203,15 +171,24 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
         case ast::EXPR_IDENTIFIER: {
             auto data = static_cast<ast::ast_expr_identifier*>(expr.get());
-            var_scope::scope_class classif;
-            if (!assign && !ctx.scope.has_var(data->identifier, classif)) {
-                throw gen_exception(
-                    data->pos,
-                    std::string("use of undeclared variable \"") + data->identifier + "\"");
+
+            switch (data->scope) {
+                case ast::SCOPE_LOCAL:
+                    ostream << LOCAL_VAR_PREFIX;
+                    ostream << data->identifier;
+                    break;
+
+                case ast::SCOPE_GLOBAL:
+                    ostream << "globals.";
+                    ostream << data->identifier;
+                    break;
+
+                case ast::SCOPE_PROPERTY:
+                    ostream << "self.";
+                    ostream << data->identifier;
+                    break;
             }
 
-            ostream << LOCAL_VAR_PREFIX;
-            ostream << data->identifier;
             break;
         }
 
@@ -474,7 +451,8 @@ static index_split_result object_index_split(
 
 static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
                                std::ostream &func_stream,
-                               std::ostream &body_contents, var_scope &scope) {
+                               std::ostream &body_contents,
+                               gen_handler_scope &scope) {
     std::stringstream tmp_stream;
     expr_gen_ctx expr_ctx { scope, body_contents };
 
@@ -484,23 +462,23 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
 
             // if this is a variable assignment, declare local variable if
             // it was not already declared
-            if (assign->lvalue->type == ast::EXPR_IDENTIFIER) {
-                auto lvalue = static_cast<ast::ast_expr_identifier*>(assign->lvalue.get());
-                std::string real_var = LOCAL_VAR_PREFIX + lvalue->identifier;
+            // if (assign->lvalue->type == ast::EXPR_IDENTIFIER) {
+            //     auto lvalue = static_cast<ast::ast_expr_identifier*>(assign->lvalue.get());
+            //     std::string real_var = LOCAL_VAR_PREFIX + lvalue->identifier;
 
-                var_scope::scope_class classif;
-                if (!scope.has_var(lvalue->identifier, classif)) {
-                    // register lingo and lua name of local
-                    scope.locals.insert(lvalue->identifier);
-                    scope.lua_locals.insert(real_var);
+            //     var_scope::scope_class classif;
+            //     if (!scope.has_var(lvalue->identifier, classif)) {
+            //         // register lingo and lua name of local
+            //         scope.locals.insert(lvalue->identifier);
+            //         scope.lua_locals.insert(real_var);
 
-                    // insert local declaration at the top of the lua
-                    // function
-                    func_stream << "local ";
-                    func_stream << real_var;
-                    func_stream << "\n";
-                }
-            }
+            //         // insert local declaration at the top of the lua
+            //         // function
+            //         func_stream << "local ";
+            //         func_stream << real_var;
+            //         func_stream << "\n";
+            //     }
+            // }
 
             generate_expr(assign->lvalue, tmp_stream, expr_ctx);
             tmp_stream << " = ";
@@ -628,26 +606,39 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
 }
 
 static void generate_func(std::ostream &stream,
-                          const ast::ast_handler_definition &handler,
-                          var_scope &parent_scope) {
-    var_scope scope;
-    scope.parent_scope = &parent_scope;
+                          const ast::ast_handler_decl &handler,
+                          gen_script_scope &script_scope) {
+    gen_handler_scope scope(script_scope);
 
-    stream << "function script." << handler.name << "(";
+    stream << "function script." << handler.name << "(self";
 
     // write and register parameter names
-    for (auto it = handler.params.begin(); it != handler.params.end(); ++it) {
-        if (it != handler.params.begin())
-            stream << ", ";
-        
-        std::string lua_name = LOCAL_VAR_PREFIX + *it;
-        scope.locals.insert(*it);
-        scope.lua_locals.insert(lua_name);
+    // note: the self argument must always be present in order for property
+    // variables to work correctly when the first argument (me) is not present
+    // in the lingo code.
+    {
+        int idx = 0;
+        for (auto it = handler.params.begin(); it != handler.params.end(); ++it, ++idx) {
+            std::string lua_name = LOCAL_VAR_PREFIX + *it;
+            scope.lua_locals.insert(lua_name);
 
-        stream << lua_name;
+            if (idx > 0) {
+                stream << ", ";
+                stream << lua_name;
+            }
+        }
     }
 
     stream << ")\n";
+
+    if (handler.params.size() > 0) {
+        stream << "local " << LOCAL_VAR_PREFIX << handler.params.front();
+        stream << " = self\n";
+    }
+
+    for (auto &local_name : handler.locals) {
+        scope.ensure_lua_local(std::string(LOCAL_VAR_PREFIX) + local_name, stream);
+    }
 
     std::stringstream body_contents;
 
@@ -674,19 +665,14 @@ static void generate_func(std::ostream &stream,
 }
 
 static void generate_script(const ast::ast_root &root, std::ostream &stream) {
-    var_scope script_scope;
-    script_scope.parent_scope = nullptr;
+    gen_script_scope script_scope;
 
-    // first, catalog all handlers defined in script
-    for (auto &gdecl : root) {
-        if (gdecl->type == ast::STATEMENT_DEFINE_HANDLER) {
-            auto decl = static_cast<ast::ast_handler_definition*>(gdecl.get());
-            script_scope.handlers.insert(decl->name);
-        }
+    // first, put all handlers defined in script into scope
+    for (auto &decl : root.handlers) {
+        script_scope.handlers.insert(decl->name);
     }
 
     // then perform code generation
-    stream << "local script = {}\n";
     stream << "local globals = lingo.globals\n";
     stream << "local lruntime = lingo.runtime\n";
     stream << "local land = lruntime.logical_and\n";
@@ -695,34 +681,21 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
     stream << "local tostring = lruntime.to_string\n";
     stream << "local btoi = lruntime.bool_to_int\n";
     stream << "\n";
+    stream << "local script = {}\n";
 
-    for (auto &gdecl : root) {
-        switch (gdecl->type) {
-            case ast::STATEMENT_DECLARE_GLOBAL: {
-                auto decl = static_cast<ast::ast_global_declaration*>(gdecl.get());
-                for (auto &id : decl->identifiers) {
-                    script_scope.globals.insert(id);
-                }
-                break;
-            }
-
-            case ast::STATEMENT_DECLARE_PROPERTY: {
-                auto decl = static_cast<ast::ast_property_declaration*>(gdecl.get());
-                for (auto &id : decl->identifiers) {
-                    script_scope.properties.insert(id);
-                }
-                break;
-            }
-
-            case ast::STATEMENT_DEFINE_HANDLER: {
-                auto decl = static_cast<ast::ast_handler_definition*>(gdecl.get());
-                generate_func(stream, *decl, script_scope);
-                break;
-            }
-
-            default:
-                throw gen_exception(gdecl->pos, "internal error");
+    stream << "script._props = {";
+    for (auto it = root.properties.begin(); it != root.properties.end(); ++it) {
+        if (it != root.properties.begin()) {
+            stream << ", ";
         }
+
+        write_escaped_str(*it, stream);
+    }
+    stream << "}\n";
+    stream << "\n";
+
+    for (auto &decl : root.handlers) {
+        generate_func(stream, *decl, script_scope);
     }
 
     stream << "return script\n";

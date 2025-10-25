@@ -407,6 +407,9 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
         }
     }
 
-    tokens.push_back(token::make_line_end(pos));
+    if (tokens.size() > 0 && !tokens.back().is_a(TOKEN_LINE_END)) {
+        tokens.push_back(token::make_line_end(pos));
+    }
+    
     return true;
 }

@@ -61,7 +61,7 @@ int main(int argc, const char *argv[]) {
     //     std::cout << "\n";
     // }
 
-    std::vector<std::unique_ptr<lingo::ast::ast_statement>> script_tree;
+    lingo::ast::ast_root script_tree;
     if (!lingo::ast::parse_ast(tokens, script_tree, &error)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
