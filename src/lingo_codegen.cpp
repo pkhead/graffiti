@@ -171,6 +171,12 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                 case ast::EXPR_LITERAL_STRING:
                     write_escaped_str(data->str, ostream);
                     break;
+
+                case ast::EXPR_LITERAL_SYMBOL:
+                    ostream << "symbol(";
+                    write_escaped_str(data->str, ostream);
+                    ostream << ")";
+                    break;
                 
                 case ast::EXPR_LITERAL_VOID:
                     ostream << "null";
@@ -864,6 +870,7 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
     }
 
     // then perform code generation
+    stream << "local symbol = lingo.symbol\n";
     stream << "local globals = lingo.globals\n";
     stream << "local lruntime = lingo.runtime\n";
     stream << "local land = lruntime.logical_and\n";

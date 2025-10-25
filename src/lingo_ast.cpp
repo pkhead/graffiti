@@ -620,6 +620,26 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             return ret;
         }
 
+        if (tok.is_symbol(SYMBOL_POUND)) {
+            const token &id_tok = reader.peek();
+
+            // why?
+            // well whatever.
+            if (id_tok.is_a(TOKEN_INTEGER) || id_tok.is_a(TOKEN_FLOAT) ||
+                id_tok.is_a(TOKEN_STRING))
+            {
+                return parse_expression<Lv>(reader, ctx);
+            }
+
+            tok_expect(reader.pop(), TOKEN_WORD);
+
+            auto ret = std::make_unique<ast_expr_literal>();
+            ret->pos = tok.pos;
+            ret->literal_type = EXPR_LITERAL_SYMBOL;
+            ret->str = id_tok.str;
+            return ret;
+        }
+
         throw parse_exception(
             tok.pos,
             std::string("unexpected ") + token_to_str(tok));

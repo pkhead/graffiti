@@ -227,7 +227,8 @@ namespace lingo {
             EXPR_LITERAL_FLOAT,
             EXPR_LITERAL_INTEGER,
             EXPR_LITERAL_STRING,
-            EXPR_LITERAL_VOID
+            EXPR_LITERAL_VOID,
+            EXPR_LITERAL_SYMBOL
         };
 
         enum ast_scope : uint8_t {
