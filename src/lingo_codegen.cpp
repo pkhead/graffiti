@@ -596,9 +596,11 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
                 auto tmp = expr_ctx.scope.create_temp_var(func_stream);
                 tmp_stream << tmp.name << " = ";
                 generate_expr(data->condition, tmp_stream, expr_ctx);
-                tmp_stream << "\nif type(" << tmp.name << ") ~= \"number\" or floor(" << tmp.name << ") ~= " << tmp.name << " then\n";
-                tmp_stream << "\terror(\"expected integer, got \" .. type(" << tmp.name << "))\n";
-                tmp_stream << "end\nif " << tmp.name << " ~= 0 then\n";
+                tmp_stream << "\nif " << tmp.name << " ~= nil and "
+                    << "type(" << tmp.name << ") ~= \"number\" or "
+                    << "floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
+                    << "\terror(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
+                    << "end\nif " << tmp.name << " ~= 0 and " << tmp.name << " ~= nil then\n";
             }
 
             for (const auto &child_stm : data->body) {
