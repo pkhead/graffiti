@@ -161,7 +161,9 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
             switch (data->literal_type) {
                 case ast::EXPR_LITERAL_FLOAT:
-                    ostream << data->floatv;
+                    char b[256];
+                    snprintf(b, 256, "%.16f", data->floatv);
+                    ostream << b;
                     break;
 
                 case ast::EXPR_LITERAL_INTEGER:
