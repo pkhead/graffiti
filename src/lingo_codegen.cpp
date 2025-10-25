@@ -107,13 +107,23 @@ static void write_escaped_str(const std::string &str, std::ostream &ostream) {
             case '\r':
                 ostream << "\\r";
                 break;
+            
+            case '\b':
+                ostream << "\\b";
+                break;
 
             case '\\':
                 ostream << "\\\\";
                 break;
             
             default:
-                ostream.put(src_ch);
+                if (src_ch < 32 || src_ch >= 126) {
+                    ostream << "\\";
+                    ostream << (unsigned int)src_ch;
+                } else {
+                    ostream.put(src_ch);
+                }
+                
                 break;
         }
     }

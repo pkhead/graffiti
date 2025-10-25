@@ -3,6 +3,14 @@
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
 
+- TODO (ALSO VERY IMPORTANT!!!!):
+    replace KEYWORD and IDENTIFIER token types with WORD. maybe the WORD token
+    type will have an extra field called short_type, which will simulate keyword
+    enum.
+
+    (although maybe i will keep KEYWORD but only for things which truly cannot
+     be used in Lingo as identifiers. which would those be?)
+
 - TODO: allow drizzle type information (obv ignore it)
 
 three types of scripts:
@@ -13,6 +21,28 @@ three types of scripts:
     - can also be attached to regular sprites
 - parent
     - basically a class template i guess. not attached to anything i think.
+
+====================
+property ancestor, thing2
+
+on new me
+  ancestor = new(script "parent1")
+  me.thing2 = "bar"
+  return me
+end
+
+-- handlers are called with obj.handler()
+-- me is automatically assigned as the first parameter to handler
+-- property variables work regardless or not the handler defines me
+-- i guess it would compile to
+--
+-- (self would always be inserted)
+-- function script.handler(self)
+--   local LN_me = self
+-- end
+--
+-- QUESTION: can you instantiate scripts that are not marked as parent scripts?
+======================
 
 unimplemented keywords:
 - char ... of ...

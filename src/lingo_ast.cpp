@@ -492,37 +492,37 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             #define MAKE_STRING(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_string(tok.pos, v))
             #define MAKE_VOID() std::make_unique<ast_expr_literal>(ast_expr_literal::make_void(tok.pos))
 
-            if (tok.str == "TRUE") {
+            if (tok.str == "true") {
                 return MAKE_INT(1);
             }
-            else if (tok.str == "FALSE") {
+            else if (tok.str == "false") {
                 return MAKE_INT(0);
             }
-            else if (tok.str == "PI") {
+            else if (tok.str == "pi") {
                 return MAKE_FLOAT(3.14159265358979323846);
             }
-            else if (tok.str == "QUOTE") {
+            else if (tok.str == "quote") {
                 return MAKE_STRING("\"");
             }
-            else if (tok.str == "EMPTY") {
+            else if (tok.str == "empty") {
                 return MAKE_STRING("");
             }
-            else if (tok.str == "ENTER") {
+            else if (tok.str == "enter") {
                 return MAKE_STRING("\x03"); // wtf is this character??
             }
-            else if (tok.str == "RETURN") {
+            else if (tok.str == "return") {
                 return MAKE_STRING("\r");
             }
-            else if (tok.str == "SPACE") {
+            else if (tok.str == "space") {
                 return MAKE_STRING(" ");
             }
-            else if (tok.str == "TAB") {
+            else if (tok.str == "tab") {
                 return MAKE_STRING("\t");
             }
-            else if (tok.str == "BACKSPACE") {
+            else if (tok.str == "backspace") {
                 return MAKE_STRING("\b");
             }
-            else if (tok.str == "VOID") {
+            else if (tok.str == "void") {
                 return MAKE_VOID();
             }
             // TODO: phrases
