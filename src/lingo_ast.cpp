@@ -157,6 +157,18 @@ static inline void tok_expect(const token &tok, token_keyword kw) {
     }
 }
 
+static inline void tok_expect(const token &tok, token_symbol sym) {
+    if (tok.type != TOKEN_SYMBOL || tok.symbol != sym) {
+        std::stringstream buf;
+        buf << "expected symbol '";
+        buf << symbol_to_str(sym);
+        buf << "', got ";
+        buf << token_to_str(tok);
+        buf << " instead";
+        throw parse_exception(tok.pos, buf.str());
+    }
+}
+
 template <unsigned int Lv = 0>
 static std::unique_ptr<ast_expr>
 parse_expression(token_reader &reader, parse_ctx &ctx,
@@ -394,84 +406,89 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
         return parse_expression<Lv+1>(reader, ctx);
     }
 
-    // dot index, array index
+    // dot index, array index, function call
     if constexpr (Lv == 5) {
         auto expr = parse_expression<Lv+1>(reader, ctx);
 
         while (true) {
             const token *op = &reader.peek();
-            if (!(op->is_symbol(SYMBOL_PERIOD) ||
-                  op->is_symbol(SYMBOL_LBRACKET)))
-                break;
-            
-            reader.pop();
-            
-            if (op->is_symbol(SYMBOL_PERIOD)) {
-                const token *id = &reader.pop();
-                tok_expect(*id, TOKEN_WORD);
 
-                auto left = std::make_unique<ast_expr_dot>();
-                left->pos = op->pos;
-                left->expr = std::move(expr);
-                left->index = id->str;
+            // func call
+            if (op->is_symbol(SYMBOL_LPAREN)) {
+                pos_info pos = reader.pop().pos;
 
-                expr = std::move(left);
-            } else if (op->is_symbol(SYMBOL_LBRACKET)) {
-                // TODO: index ranges
-                auto inner = parse_expression<0>(reader, ctx);
+                std::vector<std::unique_ptr<ast::ast_expr>> args;
+                int argn = 0;
+                while (!reader.peek().is_symbol(SYMBOL_RPAREN)) {
+                    args.push_back(parse_expression<0>(reader, ctx));
 
-                const token &term = reader.pop();
-                if (!term.is_symbol(SYMBOL_RBRACKET)) {
-                    throw parse_exception(
-                        term.pos,
-                        std::string("expected symbol ']', got ") + token_to_str(term)
-                    );
+                    // pop off optional comma
+                    const token &tok = reader.peek();
+                    if (argn > 0) {
+                        if (!tok.is_symbol(SYMBOL_RPAREN)) {
+                            tok_expect(tok, SYMBOL_COMMA);
+                            reader.pop();
+                        }
+                    } else if (reader.peek().is_symbol(SYMBOL_COMMA)) {
+                        reader.pop();
+                    }
+
+                    ++argn;
                 }
 
-                auto left = std::make_unique<ast_expr_index>();
-                left->pos = op->pos;
-                left->expr = std::move(expr);
-                left->index_from = std::move(inner);
-                left->index_to = nullptr;
+                reader.pop(); // pop off rparen
 
-                expr = std::move(left);
+                auto call = std::make_unique<ast_expr_call>();
+                call->pos = pos;
+                call->method = std::move(expr);
+                call->arguments = std::move(args);
+                expr = std::move(call);
+
+            // dot or array index
+            } else if (op->is_symbol(SYMBOL_PERIOD) ||
+                       op->is_symbol(SYMBOL_LBRACKET)) {            
+                reader.pop();
+                
+                if (op->is_symbol(SYMBOL_PERIOD)) {
+                    const token *id = &reader.pop();
+                    tok_expect(*id, TOKEN_WORD);
+
+                    auto left = std::make_unique<ast_expr_dot>();
+                    left->pos = op->pos;
+                    left->expr = std::move(expr);
+                    left->index = id->str;
+
+                    expr = std::move(left);
+                } else if (op->is_symbol(SYMBOL_LBRACKET)) {
+                    // TODO: index ranges
+                    auto inner = parse_expression<0>(reader, ctx);
+
+                    const token &term = reader.pop();
+                    if (!term.is_symbol(SYMBOL_RBRACKET)) {
+                        throw parse_exception(
+                            term.pos,
+                            std::string("expected symbol ']', got ") + token_to_str(term)
+                        );
+                    }
+
+                    auto left = std::make_unique<ast_expr_index>();
+                    left->pos = op->pos;
+                    left->expr = std::move(expr);
+                    left->index_from = std::move(inner);
+                    left->index_to = nullptr;
+
+                    expr = std::move(left);
+                }
+            } else {
+                break;
             }
         }
         
         return expr;
     }
 
-    // function calls
-    if constexpr (Lv == 6) {
-        auto expr = parse_expression<Lv+1>(reader, ctx);
-
-        while (reader.peek().is_symbol(SYMBOL_LPAREN)) {
-            pos_info pos = reader.pop().pos;
-
-            std::vector<std::unique_ptr<ast::ast_expr>> args;
-            while (!reader.peek().is_symbol(SYMBOL_RPAREN)) {
-                args.push_back(parse_expression<0>(reader, ctx));
-
-                // pop off optional comma
-                if (reader.peek().is_symbol(SYMBOL_COMMA)) {
-                    reader.pop();
-                }
-            }
-
-            reader.pop(); // pop off rparen
-
-            auto call = std::make_unique<ast_expr_call>();
-            call->pos = pos;
-            call->method = std::move(expr);
-            call->arguments = std::move(args);
-            expr = std::move(call);
-        }
-
-        return expr;
-    }
-
     // groups and literals
-    if constexpr (Lv == 7) {
+    if constexpr (Lv == 6) {
         const token &tok = reader.pop();
 
         if (tok.is_symbol(SYMBOL_LPAREN)) {
@@ -604,6 +621,22 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             tok.pos,
             std::string("unexpected ") + token_to_str(tok));
     }
+}
+
+// a statement which is formatted like this
+//   <ident> [arg1 [, arg2 [, arg3 ...]]]
+// will call handler <ident> with the given args.
+// it's very evil.
+inline static bool check_handler_invocation_statement(token_reader &reader) {
+    if (!reader.peek().is_a(TOKEN_WORD)) return false;
+
+    const token &next_tok = reader.peek(1);
+    return next_tok.is_a(TOKEN_LINE_END)    ||
+            next_tok.is_a(TOKEN_WORD)        ||
+            next_tok.is_a(TOKEN_STRING)      ||
+            next_tok.is_a(TOKEN_FLOAT)       ||
+            next_tok.is_a(TOKEN_INTEGER)     ||
+            next_tok.is_symbol(SYMBOL_POUND);
 }
 
 static std::unique_ptr<ast_statement>
@@ -921,7 +954,53 @@ parse_statement(token_reader &reader, handler_scope &scope) {
                 "expected 'while' or 'with', got " + token_to_str(*tok));
         }
 
-    // expression assignment or invocation
+    // a statement which is formatted like this
+    //   <ident> [arg1 [, arg2 [, arg3 ...]]]
+    // will call handler <ident> with the given args.
+    // it's very evil.
+    } else if (check_handler_invocation_statement(reader)) {
+        const token &id_tok = reader.pop();
+        tok_expect(id_tok, TOKEN_WORD);
+
+        auto ident_expr = std::make_unique<ast_expr_identifier>();
+        ident_expr->pos = id_tok.pos;
+        ident_expr->scope = SCOPE_LOCAL;
+        ident_expr->identifier = id_tok.str;
+
+        auto call_expr = std::make_unique<ast_expr_call>();
+        call_expr->pos = line_pos;
+        call_expr->method = std::move(ident_expr);
+
+        // parse arguments
+        int argn = 0;
+        while (!reader.peek().is_a(TOKEN_LINE_END)) {
+            auto arg_expr = parse_expression(reader, ctx);
+
+            // only the first comma is optional [sic]
+            // seriously what the fuck. like why. how.
+            tok = &reader.peek();
+            if (argn > 0) {
+                if (!tok->is_a(TOKEN_LINE_END)) {
+                    tok_expect(*tok, SYMBOL_COMMA);
+                    reader.pop();
+                } 
+            } else if (tok->is_symbol(SYMBOL_COMMA)) {
+                reader.pop();
+            }
+
+            call_expr->arguments.push_back(std::move(arg_expr));
+            ++argn;
+        }
+
+        reader.pop(); // pop newline
+
+        // create and return expression statement
+        auto stm = std::make_unique<ast_statement_expr>();
+        stm->pos = line_pos;
+        stm->expr = std::move(call_expr);
+        return std::move(stm);
+    
+    // expression assignment or evaluation
     } else {
         auto expr = parse_expression(reader, ctx, true);
 
@@ -938,13 +1017,14 @@ parse_statement(token_reader &reader, handler_scope &scope) {
 
             return stm;
 
-        // handler invocation
-        // it has a special syntax:
-        //   handler_name arg1, arg2, arg3, ...
-        // or you can do the regular
-        //   handler_name(arg1, arg2, arg3, ...)
+        // expression evaluation
         } else {
-            throw parse_exception(tok->pos, "handler invocation statement not impl");
+            tok_expect(reader.pop(), TOKEN_LINE_END);
+
+            auto stm = std::make_unique<ast_statement_expr>();
+            stm->pos = line_pos;
+            stm->expr = std::move(expr);
+            return stm;
         }
     }
     

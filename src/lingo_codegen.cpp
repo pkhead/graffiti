@@ -351,24 +351,33 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
         case ast::EXPR_CALL: {
             auto data = static_cast<ast::ast_expr_call*>(expr.get());
-
-            if (data->method->type != ast::EXPR_IDENTIFIER) {
-                throw gen_exception(data->pos, "expected identifier for handler name");
-            }
-
-            auto handler_id =
-                static_cast<ast::ast_expr_identifier*>(data->method.get());
-            const std::string &name = handler_id->identifier;
-            
-            // handler name not found in script, dynamic dispatch
             bool first_comma;
-            if (!get_handler_ref(name, ostream, ctx)) {
-                ostream << "call_handler(";
-                write_escaped_str(name, ostream);
-                first_comma = true;
-            } else {
-                ostream << "(";
+
+            if (data->method->type == ast::EXPR_DOT) {
+                auto handler_ref =
+                    static_cast<ast::ast_expr_dot*>(data->method.get());
+                
+                generate_expr(handler_ref->expr, ostream, ctx);
+                ostream << ":" << handler_ref->index << "(";
                 first_comma = false;
+            } else {
+                if (data->method->type != ast::EXPR_IDENTIFIER) {
+                    throw gen_exception(data->pos, "reference to handler must come from direct identifier or dot index");
+                }
+
+                auto handler_id =
+                    static_cast<ast::ast_expr_identifier*>(data->method.get());
+                const std::string &name = handler_id->identifier;
+                
+                // handler name not found in script, dynamic dispatch
+                if (!get_handler_ref(name, ostream, ctx)) {
+                    ostream << "call_handler(";
+                    write_escaped_str(name, ostream);
+                    first_comma = true;
+                } else {
+                    ostream << "(";
+                    first_comma = false;
+                }
             }
 
             for (auto &arg_expr : data->arguments) {
@@ -489,6 +498,22 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
     };
 
     switch (stm->type) {
+        case ast::STATEMENT_EXPR: {
+            auto data = static_cast<ast::ast_statement_expr*>(stm.get());
+
+            if (data->expr->type == ast::EXPR_CALL) {
+                generate_expr(data->expr, tmp_stream, expr_ctx);
+                tmp_stream << "\n";    
+            } else {
+                tmp_stream << "_ = ";
+                generate_expr(data->expr, tmp_stream, expr_ctx);
+                tmp_stream << " _ = nil\n";
+            }
+
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
         case ast::STATEMENT_ASSIGN: {
             auto assign = static_cast<ast::ast_statement_assign*>(stm.get());
 
@@ -766,6 +791,8 @@ static void generate_func(std::ostream &stream,
     }
 
     stream << ")\n";
+
+    stream << "local _\n";
 
     if (handler.params.size() > 0) {
         stream << "local " << LOCAL_VAR_PREFIX << handler.params.front();
