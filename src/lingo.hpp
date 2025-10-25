@@ -219,6 +219,7 @@ namespace lingo {
 
         enum ast_the_id : uint8_t {
             EXPR_THE_MOVIE_PATH,
+            EXPR_THE_FRAME,
             EXPR_THE_RANDOM_SEED,
             EXPR_THE_DIR_SEPARATOR,
         };

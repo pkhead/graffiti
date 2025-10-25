@@ -1,16 +1,8 @@
-- are constants TRUE, FALSE, VOID, QUOTE, RETURN, e.t.c. globals or built into the language? (aka keywords)
 - boolean operations don't do short-circuiting
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
 
-- TODO (ALSO VERY IMPORTANT!!!!):
-    replace KEYWORD and IDENTIFIER token types with WORD. maybe the WORD token
-    type will have an extra field called short_type, which will simulate keyword
-    enum.
-
-    (although maybe i will keep KEYWORD but only for things which truly cannot
-     be used in Lingo as identifiers. which would those be?)
-
+- TODO: linear and property list declarations
 - TODO: allow drizzle type information (obv ignore it)
 
 three types of scripts:
@@ -57,20 +49,16 @@ unimplemented keywords:
 - line ... of ...
   line ... to ... of ...
 - next repeat (aka continue)
-- put ... before ... (after is implemented)
   put ... into char/word/line X of ... (replaces)
-- repeat while
-  repeat with x = y to z
-  repeat with x = y down to z
-  repeat with var in someList
 - sprite X intersects Y
   sprite X within Y
   (or maybe are these actually generic and the pdf is lying)
-- go
+- go to
+  (might be that the only valid form of this is "go to the frame")
 - line X of Y
   word X of Y (mayeb this exists?)
   character X or Y (maybe this exists?)
-
+- set X to Y
 the:
 - moviePath = _movie.path
 - randomSeed

@@ -513,6 +513,8 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
 
             if (id.str == "moviepath") {
                 ret->identifier = EXPR_THE_MOVIE_PATH;
+            } else if (id.str == "frame") {
+                ret->identifier = EXPR_THE_FRAME;
             } else if (id.str == "dirseparator") {
                 ret->identifier = EXPR_THE_DIR_SEPARATOR;
             } else if (id.str == "randomseed") {
@@ -841,9 +843,12 @@ parse_statement(token_reader &reader, handler_scope &scope) {
                     if_stm->branches.push_back(std::move(branch));
                 }
                 
-                tok_expect(reader.pop(), TOKEN_LINE_END);
+                // tok_expect(reader.pop(), TOKEN_LINE_END);
                 if (!reader.peek().is_keyword(KEYWORD_ELSE))
                     break;
+
+                reader.pop();
+                else_allowed = true;
             }
         }
 

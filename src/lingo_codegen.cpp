@@ -203,6 +203,34 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
             break;
         }
 
+        case ast::EXPR_THE: {
+            auto data = static_cast<ast::ast_expr_the*>(expr.get());
+
+            switch (data->identifier) {
+                case ast::EXPR_THE_FRAME:
+                    ostream << "(_movie.frame)";
+                    break;
+
+                case ast::EXPR_THE_MOVIE_PATH:
+                    ostream << "(_movie.path)";
+                    break;
+
+                case ast::EXPR_THE_DIR_SEPARATOR:
+                    #ifdef _WIN32
+                    ostream << "\\";
+                    #else
+                    ostream << "/";
+                    #endif
+                    break;
+
+                case ast::EXPR_THE_RANDOM_SEED:
+                    throw gen_exception(data->pos, "the randomseed not implemented");
+                    break;
+            }
+
+            break;
+        }
+
         case ast::EXPR_BINOP: {
             auto data = static_cast<ast::ast_expr_binop*>(expr.get());
 
