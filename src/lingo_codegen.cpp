@@ -388,7 +388,7 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
             ostream << "(";
             generate_expr(data->expr, ostream, ctx);
-            ostream << "." << data->index << ")";
+            ostream << ")." << data->index;
             break;
         }
 

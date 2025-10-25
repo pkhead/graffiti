@@ -394,37 +394,8 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
         return parse_expression<Lv+1>(reader, ctx);
     }
 
-    // function calls
-    if constexpr (Lv == 5) {
-        auto expr = parse_expression<Lv+1>(reader, ctx);
-
-        while (reader.peek().is_symbol(SYMBOL_LPAREN)) {
-            pos_info pos = reader.pop().pos;
-
-            std::vector<std::unique_ptr<ast::ast_expr>> args;
-            while (!reader.peek().is_symbol(SYMBOL_RPAREN)) {
-                args.push_back(parse_expression<0>(reader, ctx));
-
-                // pop off optional comma
-                if (reader.peek().is_symbol(SYMBOL_COMMA)) {
-                    reader.pop();
-                }
-            }
-
-            reader.pop(); // pop off rparen
-
-            auto call = std::make_unique<ast_expr_call>();
-            call->pos = pos;
-            call->method = std::move(expr);
-            call->arguments = std::move(args);
-            expr = std::move(call);
-        }
-
-        return expr;
-    }
-
     // dot index, array index
-    if constexpr (Lv == 6) {
+    if constexpr (Lv == 5) {
         auto expr = parse_expression<Lv+1>(reader, ctx);
 
         while (true) {
@@ -467,6 +438,35 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             }
         }
         
+        return expr;
+    }
+
+    // function calls
+    if constexpr (Lv == 6) {
+        auto expr = parse_expression<Lv+1>(reader, ctx);
+
+        while (reader.peek().is_symbol(SYMBOL_LPAREN)) {
+            pos_info pos = reader.pop().pos;
+
+            std::vector<std::unique_ptr<ast::ast_expr>> args;
+            while (!reader.peek().is_symbol(SYMBOL_RPAREN)) {
+                args.push_back(parse_expression<0>(reader, ctx));
+
+                // pop off optional comma
+                if (reader.peek().is_symbol(SYMBOL_COMMA)) {
+                    reader.pop();
+                }
+            }
+
+            reader.pop(); // pop off rparen
+
+            auto call = std::make_unique<ast_expr_call>();
+            call->pos = pos;
+            call->method = std::move(expr);
+            call->arguments = std::move(args);
+            expr = std::move(call);
+        }
+
         return expr;
     }
 
@@ -929,6 +929,7 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         if (reader.peek().is_symbol(SYMBOL_EQUAL)) {
             reader.pop();
             auto value_expr = parse_expression(reader, ctx);
+            tok_expect(reader.pop(), TOKEN_LINE_END);
 
             auto stm = std::make_unique<ast_statement_assign>();
             stm->lvalue = std::move(expr);
@@ -1011,56 +1012,47 @@ parse_script_decl(token_reader &reader, script_scope &scope) {
         handler_scope handler_scope;
         handler_scope.parent_scope = &scope;
 
-        if (!reader.eof() && !reader.peek().is_a(TOKEN_LINE_END)) {
-            // read parameters
-            // first, see if parameter list is parenthesized or not
-            bool paren = false;
-            if (reader.peek().is_symbol(SYMBOL_LPAREN)) {
-                paren = true;
-                reader.pop(); 
+        // first, see if parameter list is parenthesized or not
+        bool paren = false;
+        if (reader.peek().is_symbol(SYMBOL_LPAREN)) {
+            paren = true;
+            reader.pop(); 
+        }
+
+        // read parameters
+        while (true) {
+            tok = &reader.pop();
+
+            // check if param list has ended
+            if (paren ? tok->is_symbol(SYMBOL_RPAREN) : tok->is_a(TOKEN_LINE_END))
+                break;
+
+            // read param name
+            tok_expect(*tok, TOKEN_WORD);
+
+            if (handler_scope.params.find(tok->str) != handler_scope.params.end()) {
+                throw parse_exception(
+                    tok->pos,
+                    std::string("parameter '") + tok->str + "' already declared");
             }
 
-            // then read parameters
-            while (true) {
-                // read param name
-                tok = &reader.pop();
-                if (paren && tok->is_symbol(SYMBOL_RPAREN)) {
-                    break;
-                }
+            func->params.push_back(tok->str);
+            handler_scope.params.insert(tok->str);
 
-                tok_expect(*tok, TOKEN_WORD);
-
-                if (handler_scope.params.find(tok->str) != handler_scope.params.end()) {
-                    throw parse_exception(
-                        tok->pos,
-                        std::string("parameter '") + tok->str + "' already declared");
-                }
-
-                func->params.push_back(tok->str);
-                handler_scope.params.insert(tok->str);
-
-                // check eol or comma
-                tok = &reader.pop();
-                if (tok->is_symbol(SYMBOL_COMMA)) {
-                    continue;
-                } else if (paren ? tok->is_symbol(SYMBOL_RPAREN) : tok->is_a(TOKEN_LINE_END)) {
-                    break;
-                } else {
-                    throw parse_exception(
-                        tok->pos,
-                        std::string("unexpected ") + token_type_str(tok->type));
-                }
+            // pop comma
+            if (reader.peek().is_symbol(SYMBOL_COMMA)) {
+                reader.pop();
             }
+        }
 
-            // pop line end off with parenthesized list
-            // if (paren) {
-            //     tok = &reader.pop();
-            //     tok_expect(*tok, TOKEN_LINE_END);
-            // }
+        // pop line end off with parenthesized list
+        if (paren) {
+            tok = &reader.pop();
+            tok_expect(*tok, TOKEN_LINE_END);
         }
 
         // pop line end
-        tok_expect(reader.pop(), TOKEN_LINE_END);
+        // tok_expect(reader.pop(), TOKEN_LINE_END);
 
         // read statements
         while (!reader.peek().is_word(WORD_ID_END)) {
