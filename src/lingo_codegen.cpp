@@ -592,22 +592,47 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
         case ast::STATEMENT_IF: {
             auto data = static_cast<ast::ast_statement_if*>(stm.get());
 
-            {
-                auto tmp = expr_ctx.scope.create_temp_var(func_stream);
-                tmp_stream << tmp.name << " = ";
-                generate_expr(data->condition, tmp_stream, expr_ctx);
-                tmp_stream << "\nif " << tmp.name << " ~= nil and "
-                    << "type(" << tmp.name << ") ~= \"number\" or "
-                    << "floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
-                    << "\terror(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
-                    << "end\nif " << tmp.name << " ~= 0 and " << tmp.name << " ~= nil then\n";
+            size_t i = 0;
+            for (auto it = data->branches.begin(); it != data->branches.end(); ++it, ++i) {
+                auto &branch = *it;
+
+                if (i > 0) {
+                    tmp_stream << "else\n";
+                }
+
+                {
+                    // insert runtime check if value is a integer or void type
+                    auto tmp = expr_ctx.scope.create_temp_var(func_stream);
+                    tmp_stream << tmp.name << " = ";
+                    generate_expr(branch->condition, tmp_stream, expr_ctx);
+                    tmp_stream << "\n";
+                    tmp_stream << "if " << tmp.name << " ~= nil and "
+                        << "type(" << tmp.name << ") ~= \"number\" or "
+                        << "math.floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
+                        << "error(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
+                        << "end\n";
+                    
+                    // create the Real branch
+                    tmp_stream << "if " << tmp.name << " ~= 0 and " << tmp.name << " ~= nil then\n";
+                }
+
+                for (const auto &child_stm : branch->body) {
+                    generate_statement(child_stm, func_stream, tmp_stream, scope);
+                }
             }
 
-            for (const auto &child_stm : data->body) {
-                generate_statement(child_stm, func_stream, tmp_stream, scope);
+            if (data->has_else) {
+                tmp_stream << "else\n";
+                for (const auto &child_stm : data->else_branch) {
+                    generate_statement(child_stm, func_stream, tmp_stream, scope);
+                }
             }
 
-            tmp_stream << "end\n";
+            for (i = 0; i < data->branches.size(); ++i) {
+                tmp_stream << "end ";
+            }
+
+            tmp_stream << "\n";
             body_contents << tmp_stream.rdbuf();
             break;
         }
@@ -660,7 +685,7 @@ static void generate_func(std::ostream &stream,
         std::string lua_name = LOCAL_VAR_PREFIX + name;
         stream << "if " << lua_name << " == true then\n";
         stream << "\t" << lua_name << " = 1\n";
-        stream << "else if " << lua_name << " == false then\n";
+        stream << "elseif " << lua_name << " == false then\n";
         stream << "\t" << lua_name << " = 0\n";
         stream << "end\n";
     }

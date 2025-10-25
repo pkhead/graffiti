@@ -373,11 +373,19 @@ namespace lingo {
             std::unique_ptr<ast_expr> expr;
         };
 
+        struct ast_if_branch {
+            std::unique_ptr<ast_expr> condition;
+            std::vector<std::unique_ptr<ast_statement>> body;
+        };
+
         struct ast_statement_if : public ast_statement {
             inline ast_statement_if() { type = STATEMENT_IF; }
 
-            std::unique_ptr<ast_expr> condition;
-            std::vector<std::unique_ptr<ast_statement>> body;
+            // the first branch is the if branch, then the rest are the
+            // else-if branches
+            std::vector<std::unique_ptr<ast_if_branch>> branches;
+            bool has_else = false;
+            std::vector<std::unique_ptr<ast_statement>> else_branch;
         };
 
         struct ast_statement_repeat_while : public ast_statement {

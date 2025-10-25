@@ -145,6 +145,18 @@ static inline void tok_expect(const token &tok, token_word_id word_id) {
     }
 }
 
+static inline void tok_expect(const token &tok, token_keyword kw) {
+    if (tok.type != TOKEN_KEYWORD || tok.keyword != kw) {
+        std::stringstream buf;
+        buf << "expected '";
+        buf << keyword_to_str(kw);
+        buf << "', got ";
+        buf << token_to_str(tok);
+        buf << " instead";
+        throw parse_exception(tok.pos, buf.str());
+    }
+}
+
 template <unsigned int Lv = 0>
 static std::unique_ptr<ast_expr>
 parse_expression(token_reader &reader, parse_ctx &ctx,
@@ -707,37 +719,99 @@ parse_statement(token_reader &reader, handler_scope &scope) {
 
         auto if_stm = std::make_unique<ast_statement_if>();
         if_stm->pos = line_pos;
-        if_stm->condition = parse_expression(reader, ctx);
+        bool else_allowed = false;
 
-        // expect then keyword
-        if (!reader.peek().is_keyword(KEYWORD_THEN)) {
-            throw parse_exception(
-                reader.peek().pos,
-                "expected keyword 'then', got " + token_to_str(reader.peek()));
-        }
-        reader.pop();
+        while (true) {
+            std::unique_ptr<ast_expr> cond_expr;
+            std::vector<std::unique_ptr<ast_statement>> body;
 
-        // if not eol, then if statement shoule be of this form:
-        //   if <cond> then <statement>
-        // if eol is present, then it should be of this form:
-        //    if <cond> then
-        //      <block>
-        //    end if
-        if (reader.peek().is_a(TOKEN_LINE_END)) {
-            reader.pop();
-            while (!reader.peek().is_word(WORD_ID_END)) {
-                if_stm->body.push_back(parse_statement(reader, scope));
+            // check if this is an else if or a terminating else
+            bool is_else;
+            if (else_allowed) {
+                if (reader.peek().is_word(WORD_ID_IF)) {
+                    reader.pop();
+                } else {
+                    is_else = true;
+                }
             }
 
-            // expect end if
-            tok = &reader.pop();
-            if (!reader.pop().is_word(WORD_ID_IF)) {
-                throw parse_exception(tok->pos, "expected end if");
+            // parse condition if this is not the else branch
+            if (!is_else) {
+                cond_expr = parse_expression(reader, ctx);
+
+                // expect then keyword
+                if (!reader.peek().is_keyword(KEYWORD_THEN)) {
+                    throw parse_exception(
+                        reader.peek().pos,
+                        "expected keyword 'then', got " + token_to_str(reader.peek()));
+                }
+
+                reader.pop(); // pop then keyword
             }
 
-            tok_expect(reader.pop(), TOKEN_LINE_END);
-        } else {
-            if_stm->body.push_back(parse_statement(reader, scope));
+            // if not eol, then if statement shoule be of this form:
+            //   if <cond> then <statement>
+            // if eol is present, then it should be of this form:
+            //    if <cond> then
+            //      <block>
+            //    (end if) | (else if) | (else)
+            if (reader.peek().is_a(TOKEN_LINE_END)) {
+                reader.pop();
+                
+                while (true) {
+                    tok = &reader.peek();
+                    if (tok->is_word(WORD_ID_END) || tok->is_keyword(KEYWORD_ELSE))
+                        break;
+                    
+                    body.push_back(parse_statement(reader, scope));
+                }
+
+                // end if found, stop and commit
+                if (is_else) {
+                    if_stm->has_else = true;
+                    if_stm->else_branch = std::move(body);
+                } else {
+                    auto branch = std::make_unique<ast_if_branch>();
+                    branch->condition = std::move(cond_expr);
+                    branch->body = std::move(body);
+                    if_stm->branches.push_back(std::move(branch));
+                }
+
+                // check if it is an "end if" or an "else"
+                // if it is an "end if", terminate if processing.
+                // otherwise, processing may continue.
+                tok = &reader.peek();
+                if (is_else) {
+                    tok_expect(*tok, WORD_ID_END);
+                }
+
+                if (tok->is_word(WORD_ID_END)) {
+                    reader.pop();
+                    if (!reader.pop().is_word(WORD_ID_IF)) {
+                        throw parse_exception(tok->pos, "expected end if");
+                    }
+
+                    tok_expect(reader.pop(), TOKEN_LINE_END);
+                    break;
+                } else {
+                    tok_expect(reader.pop(), KEYWORD_ELSE);
+                    else_allowed = true;
+                }
+            } else {
+                if (is_else) {
+                    if_stm->has_else = true;
+                    if_stm->else_branch.push_back(parse_statement(reader, scope));
+                } else {
+                    auto branch = std::make_unique<ast_if_branch>();
+                    branch->condition = std::move(cond_expr);
+                    branch->body.push_back(parse_statement(reader, scope));
+                    if_stm->branches.push_back(std::move(branch));
+                }
+                
+                tok_expect(reader.pop(), TOKEN_LINE_END);
+                if (!reader.peek().is_keyword(KEYWORD_ELSE))
+                    break;
+            }
         }
 
         return if_stm;
