@@ -31,6 +31,7 @@ class gen_handler_scope {
 private:
     int tmpvar_index = 0;
 
+public:
     class tmpvar_handle {
     private:
         gen_handler_scope &scope;
@@ -60,7 +61,6 @@ private:
         }
     };
 
-public:
     gen_script_scope &script_scope;
     std::unordered_set<std::string> lua_locals;
 
@@ -467,6 +467,27 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
     std::stringstream tmp_stream;
     expr_gen_ctx expr_ctx { scope, body_contents };
 
+    // usage:
+    // {
+    //   auto tmp = scope.create_temp_var();
+    //   auto chk = cond_check(cond_expr, tmp);
+    //   _tmp_stream << "if " << chk << " then"
+    // }
+    auto cond_check = [&](std::unique_ptr<ast::ast_expr> &cond,
+                          gen_handler_scope::tmpvar_handle &tmp) {
+        // insert runtime check if value is a integer or void type
+        tmp_stream << tmp.name << " = ";
+        generate_expr(cond, tmp_stream, expr_ctx);
+        tmp_stream << "\n";
+        tmp_stream << "if " << tmp.name << " ~= nil and "
+            << "type(" << tmp.name << ") ~= \"number\" or "
+            << "math.floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
+            << "error(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
+            << "end\n";
+        
+        return tmp.name + " ~= 0 and " + tmp.name + " ~= nil";
+    };
+
     switch (stm->type) {
         case ast::STATEMENT_ASSIGN: {
             auto assign = static_cast<ast::ast_statement_assign*>(stm.get());
@@ -604,17 +625,9 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
                 {
                     // insert runtime check if value is a integer or void type
                     auto tmp = expr_ctx.scope.create_temp_var(func_stream);
-                    tmp_stream << tmp.name << " = ";
-                    generate_expr(branch->condition, tmp_stream, expr_ctx);
-                    tmp_stream << "\n";
-                    tmp_stream << "if " << tmp.name << " ~= nil and "
-                        << "type(" << tmp.name << ") ~= \"number\" or "
-                        << "math.floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
-                        << "error(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
-                        << "end\n";
-                    
+                    auto check = cond_check(branch->condition, tmp);
                     // create the Real branch
-                    tmp_stream << "if " << tmp.name << " ~= 0 and " << tmp.name << " ~= nil then\n";
+                    tmp_stream << "if " << check << " then\n";
                 }
 
                 for (const auto &child_stm : branch->body) {
@@ -634,6 +647,91 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
             }
 
             tmp_stream << "\n";
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
+        case ast::STATEMENT_REPEAT_WHILE: {
+            auto data = static_cast<ast::ast_statement_repeat_while*>(stm.get());
+
+            tmp_stream << "while true do\n";
+            {
+                auto tmp = expr_ctx.scope.create_temp_var(func_stream);
+                auto check = cond_check(data->condition, tmp);
+                // create the Real branch
+                tmp_stream << "if not (" << check << ") then break end\n";
+            }
+
+            for (auto &child_stm : data->body) {
+                generate_statement(child_stm, func_stream, tmp_stream, scope);
+            }
+
+            tmp_stream << "::nextrepeat::\nend\n";
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
+        case ast::STATEMENT_REPEAT_TO: {
+            auto data = static_cast<ast::ast_statement_repeat_to*>(stm.get());
+
+            generate_expr(data->iterator, tmp_stream, expr_ctx);
+            tmp_stream << " = ";
+            generate_expr(data->init, tmp_stream, expr_ctx);
+
+            tmp_stream << "\nwhile ";
+            generate_expr(data->iterator, tmp_stream, expr_ctx);
+
+            if (data->down) {
+                tmp_stream << " >= ";
+            } else {
+                tmp_stream << " <= ";
+            }
+
+            generate_expr(data->to, tmp_stream, expr_ctx);
+
+            tmp_stream << " do\n";
+
+            for (auto &child_stm : data->body) {
+                generate_statement(child_stm, func_stream, tmp_stream, scope);
+            }
+
+            tmp_stream << "::nextrepeat::\n";
+
+            generate_expr(data->iterator, tmp_stream, expr_ctx);
+            tmp_stream << " = ";
+            generate_expr(data->iterator, tmp_stream, expr_ctx);
+
+            if (data->down) {
+                tmp_stream << " - 1";
+            } else {
+                tmp_stream << " + 1";
+            }
+
+            tmp_stream << "\nend\n";
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
+        case ast::STATEMENT_REPEAT_IN: {
+            auto data = static_cast<ast::ast_statement_repeat_in*>(stm.get());
+
+            auto tmp = scope.create_temp_var(func_stream);
+            tmp_stream << tmp.name << " = ";
+            generate_expr(data->iterable, tmp_stream, expr_ctx);
+
+            tmp_stream << "\nfor i=1, #" << tmp.name << " do\n";
+            generate_expr(data->iterator, tmp_stream, expr_ctx);
+            tmp_stream << " = " << tmp.name << "[i]\n";
+
+            for (auto &child_stm : data->body) {
+                generate_statement(child_stm, func_stream, tmp_stream, scope);
+            }
+
+            tmp_stream << "::exitrepeat::\nend\n";
+            tmp_stream << tmp.name << " = nil\n";
+            // TODO: should use do blocks for temp variables instead of making
+            // them always active
+
             body_contents << tmp_stream.rdbuf();
             break;
         }

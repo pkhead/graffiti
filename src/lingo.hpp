@@ -47,12 +47,14 @@ namespace lingo {
             WORD_ID_REPEAT,
             WORD_ID_WITH,
             WORD_ID_TO,
+            WORD_ID_DOWN,
             WORD_ID_WHILE,
             WORD_ID_SWITCH,
             WORD_ID_CASE,
             WORD_ID_OTHERWISE,
             WORD_ID_THE,
             WORD_ID_OF,
+            WORD_ID_IN,
             WORD_ID_PUT,
             WORD_ID_AFTER,
             WORD_ID_BEFORE,
@@ -399,17 +401,21 @@ namespace lingo {
         struct ast_statement_repeat_to : public ast_statement {
             inline ast_statement_repeat_to() { type = STATEMENT_REPEAT_TO; }
 
-            std::string iterator_identifier;
+            std::unique_ptr<ast_expr> iterator;
             std::unique_ptr<ast_expr> init;
             std::unique_ptr<ast_expr> to;
             bool down;
+
+            std::vector<std::unique_ptr<ast_statement>> body;
         };
 
         struct ast_statement_repeat_in : public ast_statement {
             inline ast_statement_repeat_in() { type = STATEMENT_REPEAT_IN; }
 
-            std::string iterator_identifier;
+            std::unique_ptr<ast_expr> iterator;
             std::unique_ptr<ast_expr> iterable;
+
+            std::vector<std::unique_ptr<ast_statement>> body;
         };
 
         struct ast_statement_exit_repeat : public ast_statement {

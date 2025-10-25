@@ -726,7 +726,7 @@ parse_statement(token_reader &reader, handler_scope &scope) {
             std::vector<std::unique_ptr<ast_statement>> body;
 
             // check if this is an else if or a terminating else
-            bool is_else;
+            bool is_else = false;
             if (else_allowed) {
                 if (reader.peek().is_word(WORD_ID_IF)) {
                     reader.pop();
@@ -815,6 +815,111 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         }
 
         return if_stm;
+
+    // repeat statement
+    } else if (tok->is_word(WORD_ID_REPEAT)) {
+        reader.pop();
+
+        tok = &reader.pop();
+
+        auto read_repeat_body = [&]() {
+            std::vector<std::unique_ptr<ast_statement>> stms;
+            while (!reader.peek().is_word(WORD_ID_END)) {
+                stms.push_back(parse_statement(reader, scope));
+            }
+
+            // pop end keyword
+            tok = &reader.pop();
+            if (!reader.pop().is_word(WORD_ID_REPEAT)) {
+                throw parse_exception(tok->pos, "expected end repeat");
+            }
+
+            tok_expect(reader.pop(), TOKEN_LINE_END);
+            return stms;
+        };
+
+        if (tok->is_word(WORD_ID_WITH)) {
+            const token *id_tok = &reader.pop();
+            tok_expect(*id_tok, TOKEN_WORD);
+
+            ast_scope id_scope = SCOPE_LOCAL;
+            if (!scope.has_var(id_tok->str, &id_scope)) {
+                scope.locals.insert(id_tok->str);
+                id_scope = SCOPE_LOCAL;
+            }
+
+            auto id_expr = std::make_unique<ast_expr_identifier>();
+            id_expr->pos = id_tok->pos;
+            id_expr->identifier = id_tok->str;
+            id_expr->scope = id_scope;
+
+            // numeric for
+            //   repeat with <var> = <init> to <stop> then
+            // or
+            //   repeat with <var> = <init> down to <stop> then
+            tok = &reader.pop();
+            if (tok->is_symbol(SYMBOL_EQUAL)) {
+                auto init_expr = parse_expression(reader, ctx);
+
+                bool down = false;
+                if (reader.peek().is_word(WORD_ID_DOWN)) {
+                    reader.pop();
+                    down = true;
+                }
+
+                tok_expect(reader.pop(), WORD_ID_TO);
+                auto stop_expr = parse_expression(reader, ctx);
+
+                // discard the rest of the line [sic]
+                while (!reader.pop().is_a(TOKEN_LINE_END));
+
+                auto repeat_stm = std::make_unique<ast_statement_repeat_to>();
+                repeat_stm->body = read_repeat_body();
+                repeat_stm->pos = line_pos;
+                repeat_stm->iterator = std::move(id_expr);
+                repeat_stm->init = std::move(init_expr);
+                repeat_stm->to = std::move(stop_expr);
+                repeat_stm->down = down;
+                return repeat_stm;
+            }
+
+            // iterable object
+            else if (tok->is_word(WORD_ID_IN)) {
+                auto iterable = parse_expression(reader, ctx);
+
+                // discard the rest of the line [sic]
+                while (!reader.pop().is_a(TOKEN_LINE_END));
+
+                auto repeat_stm = std::make_unique<ast_statement_repeat_in>();
+                repeat_stm->body = read_repeat_body();
+                repeat_stm->pos = line_pos;
+                repeat_stm->iterator = std::move(id_expr);
+                repeat_stm->iterable = std::move(iterable);
+                return repeat_stm;
+            }
+
+            else {
+                throw parse_exception(
+                    tok->pos,
+                    "expected '=' or 'in', got " + token_to_str(*tok));
+            }
+        }
+        else if (tok->is_word(WORD_ID_WHILE)) {
+            auto cond_expr = parse_expression(reader, ctx);
+
+            // discard the rest of the line [sic]
+            while (!reader.pop().is_a(TOKEN_LINE_END));
+
+            auto repeat_stm = std::make_unique<ast_statement_repeat_while>();
+            repeat_stm->body = read_repeat_body();
+            repeat_stm->pos = line_pos;
+            repeat_stm->condition = std::move(cond_expr);
+            return repeat_stm;
+        } else {
+            throw parse_exception(
+                tok->pos,
+                "expected 'while' or 'with', got " + token_to_str(*tok));
+        }
 
     // expression assignment or invocation
     } else {
