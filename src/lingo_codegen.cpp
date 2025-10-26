@@ -3,6 +3,7 @@
 #include <sstream>
 #include <memory>
 #include <unordered_set>
+#include <unordered_map>
 
 using namespace lingo;
 
@@ -132,17 +133,37 @@ static void write_escaped_str(const std::string &str, std::ostream &ostream) {
     ostream.put('"');
 }
 
+static inline bool is_literal_str(const ast::ast_expr *expr, const char **str) {
+    if (expr->type != ast::EXPR_LITERAL) return false;
+    const auto *data = static_cast<const ast::ast_expr_literal*>(expr);
+    if (data->literal_type != ast::EXPR_LITERAL_STRING) return false;
+
+    if (str) *str = data->str.c_str();
+    return true;
+}
+
 static bool get_handler_ref(const std::string &name, std::ostream &ostream,
                             expr_gen_ctx &ctx) {
-    static constexpr const char *MATH_LIBRARY_FUNCS[] = {
-        "abs", "atan", "cos", "exp", "log", "sin", "sqrt",
-    };
+    static const std::unordered_map<std::string, std::string> fmap = {
+        { "abs", "math.abs" },
+        { "atan", "math.atan" },
+        { "cos", "math.cos" },
+        { "exp", "math.exp" },
+        { "log", "math.log" },
+        { "sin", "math.sin" },
+        { "sqrt", "math.sqrt" },
 
-    for (size_t i = 0; i < sizeof(MATH_LIBRARY_FUNCS)/sizeof(*MATH_LIBRARY_FUNCS); ++i) {
-        if (name == MATH_LIBRARY_FUNCS[i]) {
-            ostream << "math." << name;
-            return true;
-        }
+        { "rect", "lingo.rect" },
+        { "point", "lingo.point" },
+        { "member", "member" },
+        { "sprite", "sprite" },
+        { "float", "lruntime.to_float" },
+    };
+    
+    const auto &it = fmap.find(name);
+    if (it != fmap.end()) {
+        ostream << it->second;
+        return true;
     }
     
     if (ctx.scope.script_scope.has_handler(name)) {
@@ -328,19 +349,45 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                         break;
 
                     case ast::EXPR_BINOP_CONCAT:
-                        ostream << "tostring(";
-                        generate_expr(data->left, ostream, ctx);
-                        ostream << ") .. tostring(";
-                        generate_expr(data->right, ostream, ctx);
-                        ostream << ")";
+                        if (is_literal_str(data->left.get(), nullptr)) {
+                            generate_expr(data->left, ostream, ctx);
+                        } else {
+                            ostream << "tostring(";
+                            generate_expr(data->left, ostream, ctx);
+                            ostream << ")";
+                        }
+
+                        ostream << " .. ";
+
+                        if (is_literal_str(data->right.get(), nullptr)) {
+                            generate_expr(data->right, ostream, ctx);
+                        } else {
+                            ostream << "tostring(";
+                            generate_expr(data->right, ostream, ctx);
+                            ostream << ")";
+                        }
+
                         break;
                     
                     case ast::EXPR_BINOP_CONCAT_WITH_SPACE:
-                        ostream << "tostring(";
-                        generate_expr(data->left, ostream, ctx);
-                        ostream << ") ..\" \".. tostring(";
-                        generate_expr(data->right, ostream, ctx);
-                        ostream << ")";
+                    if (is_literal_str(data->left.get(), nullptr)) {
+                            generate_expr(data->left, ostream, ctx);
+                        } else {
+                            ostream << "tostring(";
+                            generate_expr(data->left, ostream, ctx);
+                            ostream << ")";
+                        }
+
+                        ostream << " ..\" \".. ";
+
+                        if (is_literal_str(data->right.get(), nullptr)) {
+                            generate_expr(data->right, ostream, ctx);
+                        } else {
+                            ostream << "tostring(";
+                            generate_expr(data->right, ostream, ctx);
+                            ostream << ")";
+                        }
+
                         break;
 
                     case ast::EXPR_BINOP_EQ:
