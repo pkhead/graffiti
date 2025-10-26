@@ -1125,6 +1125,40 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         }
 
         return nullptr;
+    
+    } else if (tok->is_word(WORD_ID_NEXT)) {
+        reader.pop();
+        tok_expect(reader.pop(), WORD_ID_REPEAT);
+        tok_expect(reader.pop(), TOKEN_LINE_END);
+
+        auto stm = std::make_unique<ast_statement_next_repeat>();
+        stm->pos = line_pos;
+        return stm;
+    }
+
+    else if (tok->is_word(WORD_ID_EXIT)) {
+        reader.pop();
+
+        if (reader.peek().is_a(TOKEN_LINE_END)) {
+            reader.pop();
+            auto stm = std::make_unique<ast_statement_return>();
+            stm->pos = line_pos;
+            stm->expr = nullptr;
+            return stm;
+        }
+
+        if (reader.peek().is_word(WORD_ID_REPEAT)) {
+            reader.pop();
+            tok_expect(reader.pop(), TOKEN_LINE_END);
+
+            auto stm = std::make_unique<ast_statement_exit_repeat>();
+            stm->pos = line_pos;
+            return stm;
+        }
+
+        tok_expect(reader.peek(), TOKEN_LINE_END);
+        assert(false && "unreachable");
+        return nullptr; // three layers of abortion lol
 
     // a statement which is formatted like this
     //   <ident> [arg1 [, arg2 [, arg3 ...]]]

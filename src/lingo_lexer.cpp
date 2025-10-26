@@ -57,6 +57,8 @@ struct { token_keyword e; const char *str; } static const keyword_pairs[] = {
 static const std::unordered_map<std::string, token_word_id> str_to_word_id = {
     { "return", WORD_ID_RETURN },
     { "end", WORD_ID_END },
+    { "next", WORD_ID_NEXT },
+    { "exit", WORD_ID_EXIT },
     { "if", WORD_ID_IF },
     { "repeat", WORD_ID_REPEAT },
     { "with", WORD_ID_WITH },

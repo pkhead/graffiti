@@ -43,6 +43,8 @@ namespace lingo {
         enum token_word_id : uint8_t {
             WORD_ID_RETURN,
             WORD_ID_END,
+            WORD_ID_EXIT,
+            WORD_ID_NEXT,
             WORD_ID_IF,
             WORD_ID_REPEAT,
             WORD_ID_WITH,

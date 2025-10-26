@@ -709,6 +709,16 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
             break;
         }
 
+        case ast::STATEMENT_EXIT_REPEAT: {
+            body_contents << "break\n";
+            break;
+        }
+
+        case ast::STATEMENT_NEXT_REPEAT: {
+            body_contents << "goto ::nextrepeat::\n";
+            break;
+        }
+
         case ast::STATEMENT_IF: {
             auto data = static_cast<ast::ast_statement_if*>(stm.get());
 
