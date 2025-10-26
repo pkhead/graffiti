@@ -239,6 +239,43 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
             break;
         }
 
+        case ast::EXPR_LIST: {
+            auto data = static_cast<ast::ast_expr_list*>(expr.get());
+
+            ostream << "lingo.list(";
+            bool write_comma = false;
+            for (auto &elem : data->items) {
+                if (write_comma)
+                    ostream << ", ";
+
+                generate_expr(elem, ostream, ctx);
+                write_comma = true;
+            }
+            ostream << ")";
+
+            break;
+        }
+
+        case ast::EXPR_PROP_LIST: {
+            auto data = static_cast<ast::ast_expr_prop_list*>(expr.get());
+
+            ostream << "lingo.propList(";
+            bool write_comma = false;
+            for (auto &pair : data->pairs) {
+                if (write_comma)
+                    ostream << ", ";
+
+                generate_expr(pair.first, ostream, ctx);
+                ostream << ",";
+                generate_expr(pair.second, ostream, ctx);
+                
+                write_comma = true;
+            }
+            ostream << ")";
+
+            break;
+        }
+
         case ast::EXPR_BINOP: {
             auto data = static_cast<ast::ast_expr_binop*>(expr.get());
 

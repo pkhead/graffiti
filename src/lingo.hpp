@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <istream>
 #include <vector>
+#include <utility>
 #include <memory>
 
 namespace lingo {
@@ -88,6 +89,8 @@ namespace lingo {
             SYMBOL_RPAREN, // )
             SYMBOL_LBRACKET, // [
             SYMBOL_RBRACKET, // ]
+            SYMBOL_LBRACE, // {
+            SYMBOL_RBRACE, // }
             SYMBOL_COLON, // :
 
             SYMBOL_EQUAL, // = (both assignment and comparison)
@@ -184,6 +187,8 @@ namespace lingo {
             EXPR_UNOP, // ? X
             EXPR_THE, // the X
             EXPR_LITERAL,
+            EXPR_LIST,
+            EXPR_PROP_LIST,
             EXPR_IDENTIFIER,
             EXPR_DOT, // X.Y
             EXPR_INDEX, // X[Y] or X[A..B]
@@ -298,6 +303,15 @@ namespace lingo {
                 return ret;
             }
 
+            static inline ast_expr_literal make_symbol(pos_info pos,
+                                                       const std::string &v) {
+                ast_expr_literal ret;
+                ret.pos = pos;
+                ret.literal_type = EXPR_LITERAL_SYMBOL;
+                ret.str = v;
+                return ret;
+            }
+
             static inline ast_expr_literal make_void(pos_info pos) {
                 ast_expr_literal ret;
                 ret.pos = pos;
@@ -311,6 +325,19 @@ namespace lingo {
 
             std::string identifier;
             ast_scope scope;
+        };
+
+        struct ast_expr_list : public ast_expr {
+            inline ast_expr_list() { type = EXPR_LIST; }
+
+            std::vector<std::unique_ptr<ast_expr>> items;
+        };
+
+        struct ast_expr_prop_list : public ast_expr {
+            inline ast_expr_prop_list() { type = EXPR_PROP_LIST; }
+
+            std::vector<std::pair<std::unique_ptr<ast_expr>,
+                                  std::unique_ptr<ast_expr>>> pairs;
         };
 
         struct ast_expr_dot : public ast_expr {

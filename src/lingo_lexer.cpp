@@ -32,6 +32,8 @@ struct { token_symbol e; const char *str; } static const symbol_pairs[] = {
     { SYMBOL_RPAREN, ")" },
     { SYMBOL_LBRACKET, "[" },
     { SYMBOL_RBRACKET, "]" },
+    { SYMBOL_LBRACE, "{" },
+    { SYMBOL_RBRACE, "}" },
     { SYMBOL_COLON, ":" },
     { SYMBOL_EQUAL, "=" },
     { SYMBOL_LT, "<" }, 

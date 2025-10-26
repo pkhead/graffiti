@@ -7,6 +7,12 @@
 using namespace lingo;
 using namespace lingo::ast;
 
+#define MAKE_INT(p,v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_int((p), (v)))
+#define MAKE_FLOAT(p,v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_float((p), (v)))
+#define MAKE_STRING(p,v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_string((p), (v)))
+#define MAKE_SYMBOL(p,v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_symbol((p), (v)))
+#define MAKE_VOID(p) std::make_unique<ast_expr_literal>(ast_expr_literal::make_void((p)))
+
 class parse_exception : public std::runtime_error {
 public:
     pos_info pos;
@@ -491,7 +497,36 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
     // groups and literals
     if constexpr (Lv == 6) {
         const token &tok = reader.pop();
+        auto parse_symbol_literal = [&]() -> std::unique_ptr<ast_expr> {
+            const token &id_tok = reader.pop();
 
+            // why?
+            // ugh, whatever.
+            // TODO: manual Fuckery cus it shouldn't interpret non-literals
+            // like groups and the or whatever
+            switch (id_tok.type) {
+                case TOKEN_INTEGER:
+                    return MAKE_INT(id_tok.pos, id_tok.integer);
+                
+                case TOKEN_FLOAT:
+                    return MAKE_FLOAT(id_tok.pos, id_tok.number);
+
+                case TOKEN_STRING:
+                    return MAKE_STRING(id_tok.pos, id_tok.str);
+
+                default: break;
+            }
+
+            tok_expect(id_tok, TOKEN_WORD);
+
+            auto ret = std::make_unique<ast_expr_literal>();
+            ret->pos = tok.pos;
+            ret->literal_type = EXPR_LITERAL_SYMBOL;
+            ret->str = id_tok.str;
+            return ret;
+        };
+
+        // group
         if (tok.is_symbol(SYMBOL_LPAREN)) {
             auto expr = parse_expression<0>(reader, ctx);
 
@@ -503,6 +538,117 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             }
 
             return expr;
+        }
+
+        // linear or property list
+        if (tok.is_symbol(SYMBOL_LBRACKET) || tok.is_symbol(SYMBOL_LBRACE)) {
+            token_symbol list_term_symbol =
+                tok.is_symbol(SYMBOL_LBRACKET)
+                    ? SYMBOL_RBRACKET
+                    : SYMBOL_RBRACE;
+            
+            // empty linear list
+            if (reader.peek().is_symbol(list_term_symbol)) {
+                reader.pop();
+                auto list_expr = std::make_unique<ast_expr_list>();
+                list_expr->pos = tok.pos;
+                return list_expr;
+            }
+
+            // [:] signifies empty property list
+            if (reader.peek().is_symbol(SYMBOL_COLON)) {
+                reader.pop();
+                auto list_expr = std::make_unique<ast_expr_prop_list>();
+                list_expr->pos = tok.pos;
+
+                tok_expect(reader.pop(), list_term_symbol);
+                return list_expr;
+            }
+
+            // non-empty property list starts with
+            //    <word|number|string|symbol>:
+            bool is_prop_list;
+            if (reader.peek().is_symbol(SYMBOL_POUND)) {
+                is_prop_list = reader.peek(2).is_symbol(SYMBOL_COLON);
+            } else {
+                is_prop_list = reader.peek(1).is_symbol(SYMBOL_COLON);
+            }
+
+            if (is_prop_list) {
+                auto list_expr = std::make_unique<ast_expr_prop_list>();
+                list_expr->pos = tok.pos;
+                
+                bool expect_comma = false;
+                while (!reader.peek().is_symbol(list_term_symbol)) {
+                    if (expect_comma)
+                        tok_expect(reader.pop(), SYMBOL_COMMA);
+                    
+                    // read key
+                    const token &key_tok = reader.pop();
+                    std::unique_ptr<ast_expr> key_expr;
+                    switch (key_tok.type) {
+                        case TOKEN_WORD:
+                            key_expr = MAKE_SYMBOL(key_tok.pos, key_tok.str);
+                            break;
+                        
+                        case TOKEN_INTEGER:
+                            key_expr = MAKE_INT(key_tok.pos, key_tok.integer);
+                            break;
+                        
+                        case TOKEN_FLOAT:
+                            key_expr = MAKE_FLOAT(key_tok.pos, key_tok.number);
+                            break;
+                        
+                        case TOKEN_STRING:
+                            key_expr = MAKE_STRING(key_tok.pos, key_tok.str);
+                            break;
+                        
+                        case TOKEN_SYMBOL: {
+                            tok_expect(key_tok, SYMBOL_POUND);
+                            key_expr = parse_symbol_literal();
+                            break;
+                        }
+
+                        default:
+                            throw parse_exception(
+                                key_tok.pos,
+                                "unexpected " + token_to_str(key_tok));
+                    }
+
+                    tok_expect(reader.pop(), SYMBOL_COLON);
+
+                    // read value expression and push
+                    list_expr->pairs.push_back(std::make_pair(
+                        std::move(key_expr),
+                        parse_expression<0>(reader, ctx)));
+                    
+                    expect_comma = true;
+                }
+
+                // pop rbracket
+                reader.pop();
+
+                return list_expr;
+            
+            // linear list
+            } else {
+                auto list_expr = std::make_unique<ast_expr_list>();
+                list_expr->pos = tok.pos;
+
+                bool expect_comma = false;
+                while (!reader.peek().is_symbol(list_term_symbol)) {
+                    if (expect_comma)
+                        tok_expect(reader.pop(), SYMBOL_COMMA);
+
+                    list_expr->items.push_back(parse_expression<0>(reader, ctx));
+                    expect_comma = true;
+                }
+
+                // pop rbracket
+                tok_expect(reader.pop(), list_term_symbol);
+
+                return list_expr;
+            }
         }
 
         if (tok.is_word(WORD_ID_THE)) {
@@ -530,44 +676,38 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
         }
 
         if (tok.is_a(TOKEN_WORD)) {
-            // TODO: built-in constants (not done rn because QUOTE = 3 is a valid statement)
-            #define MAKE_INT(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_int(tok.pos, v))
-            #define MAKE_FLOAT(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_float(tok.pos, v))
-            #define MAKE_STRING(v) std::make_unique<ast_expr_literal>(ast_expr_literal::make_string(tok.pos, v))
-            #define MAKE_VOID() std::make_unique<ast_expr_literal>(ast_expr_literal::make_void(tok.pos))
-
             if (tok.str == "true") {
-                return MAKE_INT(1);
+                return MAKE_INT(tok.pos, 1);
             }
             else if (tok.str == "false") {
-                return MAKE_INT(0);
+                return MAKE_INT(tok.pos, 0);
             }
             else if (tok.str == "pi") {
-                return MAKE_FLOAT(3.14159265358979323846);
+                return MAKE_FLOAT(tok.pos, 3.14159265358979323846);
             }
             else if (tok.str == "quote") {
-                return MAKE_STRING("\"");
+                return MAKE_STRING(tok.pos, "\"");
             }
             else if (tok.str == "empty") {
-                return MAKE_STRING("");
+                return MAKE_STRING(tok.pos, "");
             }
             else if (tok.str == "enter") {
-                return MAKE_STRING("\x03"); // wtf is this character??
+                return MAKE_STRING(tok.pos, "\x03"); // wtf is this character??
             }
             else if (tok.str == "return") {
-                return MAKE_STRING("\r");
+                return MAKE_STRING(tok.pos, "\r");
             }
             else if (tok.str == "space") {
-                return MAKE_STRING(" ");
+                return MAKE_STRING(tok.pos, " ");
             }
             else if (tok.str == "tab") {
-                return MAKE_STRING("\t");
+                return MAKE_STRING(tok.pos, "\t");
             }
             else if (tok.str == "backspace") {
-                return MAKE_STRING("\b");
+                return MAKE_STRING(tok.pos, "\b");
             }
             else if (tok.str == "void") {
-                return MAKE_VOID();
+                return MAKE_VOID(tok.pos);
             }
             // TODO: phrases
 
@@ -590,10 +730,6 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
             ret->scope = func_call ? SCOPE_LOCAL : var_scope;
 
             return ret;
-
-            #undef MAKE_INT
-            #undef MAKE_FLOAT
-            #undef MAKE_STRING
         }
 
         if (tok.is_a(TOKEN_FLOAT)) {
@@ -621,23 +757,7 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
         }
 
         if (tok.is_symbol(SYMBOL_POUND)) {
-            const token &id_tok = reader.peek();
-
-            // why?
-            // well whatever.
-            if (id_tok.is_a(TOKEN_INTEGER) || id_tok.is_a(TOKEN_FLOAT) ||
-                id_tok.is_a(TOKEN_STRING))
-            {
-                return parse_expression<Lv>(reader, ctx);
-            }
-
-            tok_expect(reader.pop(), TOKEN_WORD);
-
-            auto ret = std::make_unique<ast_expr_literal>();
-            ret->pos = tok.pos;
-            ret->literal_type = EXPR_LITERAL_SYMBOL;
-            ret->str = id_tok.str;
-            return ret;
+            return parse_symbol_literal();
         }
 
         throw parse_exception(
