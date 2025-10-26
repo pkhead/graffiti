@@ -1100,6 +1100,32 @@ parse_statement(token_reader &reader, handler_scope &scope) {
                 "expected 'while' or 'with', got " + token_to_str(*tok));
         }
 
+    } else if (tok->is_word(WORD_ID_GLOBAL)) {
+        reader.pop();
+
+        while (true) {
+            const token &id_tok = reader.pop();
+            tok_expect(id_tok, TOKEN_WORD);
+
+            if (scope.globals.find(id_tok.str) != scope.globals.end() ||
+                scope.parent_scope->globals.find(id_tok.str) != scope.parent_scope->globals.end()) {
+                throw parse_exception(
+                    tok->pos,
+                    "global '" + id_tok.str + "' already declared");
+            }
+            
+            scope.globals.insert(id_tok.str);
+
+            const token &next_tok = reader.pop();
+            if (next_tok.is_a(TOKEN_LINE_END)) {
+                break;
+            }
+
+            tok_expect(next_tok, TOKEN_SYMBOL);
+        }
+
+        return nullptr;
+
     // a statement which is formatted like this
     //   <ident> [arg1 [, arg2 [, arg3 ...]]]
     // will call handler <ident> with the given args.
