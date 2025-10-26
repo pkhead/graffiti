@@ -2,7 +2,13 @@
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
 
-- TODO: linear and property list declarations
+- TODO: psuedo-indicies (done in ast generation):
+    A.float -> lruntime.psuedo.float(A)
+    A.lines[B] -> lruntime.psuedo.str_line(A, B)
+    A.lines[B..C] -> lruntime.psuedo.str_line(A, B, C)
+- TODO: empty global declaration can exist
+- TODO: duplicate handler-level global declarations can exist
+- TODO: next (the marker + 1) keyword
 - TODO: allow drizzle type information (obv ignore it)
 
 three types of scripts:
