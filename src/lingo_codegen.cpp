@@ -891,6 +891,55 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
             break;
         }
 
+        case ast::STATEMENT_CASE: {
+            auto data = static_cast<ast::ast_statement_case*>(stm.get());
+
+            tmp_stream << "do\n";
+            tmp_stream << "local case = ";
+            generate_expr(data->expr, tmp_stream, expr_ctx);
+            tmp_stream << "\n";
+
+            // if case has only an otherwise clause, run otherwise clause
+            // unconditionally
+            if (data->clauses.empty() && data->has_otherwise) {
+                for (auto &child_stm : data->otherwise_clause) {
+                    generate_statement(child_stm, func_stream, tmp_stream, scope);
+                }
+            } else {
+                bool is_first = true;
+                for (auto &clause : data->clauses) {
+                    if (is_first)
+                        tmp_stream << "if";
+                    else
+                        tmp_stream << "elif";
+
+                    tmp_stream << " case == ";
+                    generate_expr(clause->literal, tmp_stream, expr_ctx);
+                    tmp_stream << " then\n";
+
+                    for (auto &child_stm : clause->branch) {
+                        generate_statement(child_stm, func_stream, tmp_stream, scope);
+                    }
+
+                    is_first = false;
+                }
+
+                if (data->has_otherwise) {
+                    tmp_stream << "else\n";
+
+                    for (auto &child_stm : data->otherwise_clause) {
+                        generate_statement(child_stm, func_stream, tmp_stream, scope);
+                    }
+                }
+
+                tmp_stream << "end\n";
+            }
+
+            tmp_stream << "end\n";
+            body_contents << tmp_stream.rdbuf();
+            break;
+        }
+
         default:
             throw new gen_exception(stm->pos, "unknown statement type");
     }
@@ -1044,8 +1093,8 @@ bool lingo::compile_luajit_text(std::istream &istream, std::ostream &ostream,
     //             std::cout << lingo::ast::keyword_to_str(tok.keyword);
     //             break;
 
-    //         case lingo::ast::TOKEN_IDENTIFIER:
-    //             std::cout << "(IDN) ";
+    //         case lingo::ast::TOKEN_WORD:
+    //             std::cout << "(WRD) ";
     //             std::cout << tok.str;
     //             break;
             
@@ -1056,6 +1105,11 @@ bool lingo::compile_luajit_text(std::istream &istream, std::ostream &ostream,
 
     //         case lingo::ast::TOKEN_STRING:
     //             std::cout << "(STR) ";
+    //             std::cout << tok.str;
+    //             break;
+
+    //         case lingo::ast::TOKEN_SYMBOL_LITERAL:
+    //             std::cout << "(SYL) ";
     //             std::cout << tok.str;
     //             break;
             

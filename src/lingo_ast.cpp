@@ -176,6 +176,36 @@ static inline void tok_expect(const token &tok, token_symbol sym) {
     }
 }
 
+// static inline std::unique_ptr<ast_expr>
+// parse_symbol_literal(pos_info pos, token_reader &reader) {
+//     const token &id_tok = reader.pop();
+
+//     // why?
+//     // ugh, whatever.
+//     // TODO: manual Fuckery cus it shouldn't interpret non-literals
+//     // like groups and the or whatever
+//     switch (id_tok.type) {
+//         case TOKEN_INTEGER:
+//             return MAKE_INT(id_tok.pos, id_tok.integer);
+        
+//         case TOKEN_FLOAT:
+//             return MAKE_FLOAT(id_tok.pos, id_tok.number);
+
+//         case TOKEN_STRING:
+//             return MAKE_STRING(id_tok.pos, id_tok.str);
+
+//         default: break;
+//     }
+
+//     tok_expect(id_tok, TOKEN_WORD);
+
+//     auto ret = std::make_unique<ast_expr_literal>();
+//     ret->pos = pos;
+//     ret->literal_type = EXPR_LITERAL_SYMBOL;
+//     ret->str = id_tok.str;
+//     return ret;
+// };
+
 template <unsigned int Lv = 0>
 static std::unique_ptr<ast_expr>
 parse_expression(token_reader &reader, parse_ctx &ctx,
@@ -497,34 +527,6 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
     // groups and literals
     if constexpr (Lv == 6) {
         const token &tok = reader.pop();
-        auto parse_symbol_literal = [&]() -> std::unique_ptr<ast_expr> {
-            const token &id_tok = reader.pop();
-
-            // why?
-            // ugh, whatever.
-            // TODO: manual Fuckery cus it shouldn't interpret non-literals
-            // like groups and the or whatever
-            switch (id_tok.type) {
-                case TOKEN_INTEGER:
-                    return MAKE_INT(id_tok.pos, id_tok.integer);
-                
-                case TOKEN_FLOAT:
-                    return MAKE_FLOAT(id_tok.pos, id_tok.number);
-
-                case TOKEN_STRING:
-                    return MAKE_STRING(id_tok.pos, id_tok.str);
-
-                default: break;
-            }
-
-            tok_expect(id_tok, TOKEN_WORD);
-
-            auto ret = std::make_unique<ast_expr_literal>();
-            ret->pos = tok.pos;
-            ret->literal_type = EXPR_LITERAL_SYMBOL;
-            ret->str = id_tok.str;
-            return ret;
-        };
 
         // group
         if (tok.is_symbol(SYMBOL_LPAREN)) {
@@ -567,12 +569,7 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
 
             // non-empty property list starts with
             //    <word|number|string|symbol>:
-            bool is_prop_list;
-            if (reader.peek().is_symbol(SYMBOL_POUND)) {
-                is_prop_list = reader.peek(2).is_symbol(SYMBOL_COLON);
-            } else {
-                is_prop_list = reader.peek(1).is_symbol(SYMBOL_COLON);
-            }
+            bool is_prop_list = reader.peek(1).is_symbol(SYMBOL_COLON);
 
             if (is_prop_list) {
                 auto list_expr = std::make_unique<ast_expr_prop_list>();
@@ -588,6 +585,7 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
                     std::unique_ptr<ast_expr> key_expr;
                     switch (key_tok.type) {
                         case TOKEN_WORD:
+                        case TOKEN_SYMBOL_LITERAL:
                             key_expr = MAKE_SYMBOL(key_tok.pos, key_tok.str);
                             break;
                         
@@ -602,12 +600,6 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
                         case TOKEN_STRING:
                             key_expr = MAKE_STRING(key_tok.pos, key_tok.str);
                             break;
-                        
-                        case TOKEN_SYMBOL: {
-                            tok_expect(key_tok, SYMBOL_POUND);
-                            key_expr = parse_symbol_literal();
-                            break;
-                        }
 
                         default:
                             throw parse_exception(
@@ -733,31 +725,19 @@ parse_expression(token_reader &reader, parse_ctx &ctx,
         }
 
         if (tok.is_a(TOKEN_FLOAT)) {
-            auto ret = std::make_unique<ast_expr_literal>();
-            ret->pos = tok.pos;
-            ret->literal_type = EXPR_LITERAL_FLOAT;
-            ret->floatv = tok.number;
-            return ret;
+            return MAKE_FLOAT(tok.pos, tok.number);
         }
 
         if (tok.is_a(TOKEN_INTEGER)) {
-            auto ret = std::make_unique<ast_expr_literal>();
-            ret->pos = tok.pos;
-            ret->literal_type = EXPR_LITERAL_INTEGER;
-            ret->intv = tok.integer;
-            return ret;
+            return MAKE_INT(tok.pos, tok.integer);
         }
 
         if (tok.is_a(TOKEN_STRING)) {
-            auto ret = std::make_unique<ast_expr_literal>();
-            ret->pos = tok.pos;
-            ret->literal_type = EXPR_LITERAL_STRING;
-            ret->str = tok.str;
-            return ret;
+            return MAKE_STRING(tok.pos, tok.str);
         }
 
-        if (tok.is_symbol(SYMBOL_POUND)) {
-            return parse_symbol_literal();
+        if (tok.is_a(TOKEN_SYMBOL_LITERAL)) {
+            return MAKE_SYMBOL(tok.pos, tok.str);
         }
 
         throw parse_exception(
@@ -779,7 +759,7 @@ inline static bool check_handler_invocation_statement(token_reader &reader) {
             next_tok.is_a(TOKEN_STRING)      ||
             next_tok.is_a(TOKEN_FLOAT)       ||
             next_tok.is_a(TOKEN_INTEGER)     ||
-            next_tok.is_symbol(SYMBOL_POUND);
+            next_tok.is_a(TOKEN_SYMBOL_LITERAL);
 }
 
 static std::unique_ptr<ast_statement>
@@ -1159,6 +1139,97 @@ parse_statement(token_reader &reader, handler_scope &scope) {
         tok_expect(reader.peek(), TOKEN_LINE_END);
         assert(false && "unreachable");
         return nullptr; // three layers of abortion lol
+    
+    } else if (tok->is_word(WORD_ID_CASE)) {
+        reader.pop();
+
+        auto stm = std::make_unique<ast_statement_case>();
+        stm->pos = line_pos;
+        stm->expr = parse_expression(reader, ctx);
+        stm->has_otherwise = false;
+
+        tok_expect(reader.pop(), WORD_ID_OF);
+
+        // discard the rest of the line [sic]
+        while (!reader.pop().is_a(TOKEN_LINE_END));
+
+        // parse clauses
+        while (true) {
+            tok = &reader.peek();
+            if (tok->is_word(WORD_ID_END)) {
+                reader.pop();
+                if (!reader.pop().is_word(WORD_ID_CASE)) {
+                    throw parse_exception(tok->pos, "expected 'end case'");
+                }
+
+                tok_expect(reader.pop(), TOKEN_LINE_END);
+                break;
+            }
+
+            auto cur_clause = std::make_unique<ast_case_clause>();
+            bool is_otherwise = false;
+
+            tok = &reader.pop();
+            if (tok->is_word(WORD_ID_OTHERWISE)) {
+                is_otherwise = true;
+            } else {
+                is_otherwise = false;
+
+                switch (tok->type) {
+                    case TOKEN_INTEGER:
+                        cur_clause->literal =
+                            MAKE_INT(tok->pos, tok->integer);
+                        break;
+                    
+                    case TOKEN_FLOAT:
+                        cur_clause->literal =
+                            MAKE_FLOAT(tok->pos, tok->integer);
+                        break;
+                    
+                    case TOKEN_STRING:
+                        cur_clause->literal =
+                            MAKE_STRING(tok->pos, tok->str);
+                        break;
+                    
+                    case TOKEN_SYMBOL_LITERAL:
+                        cur_clause->literal =
+                            MAKE_SYMBOL(tok->pos, tok->str);
+                        break;
+                    
+                    default:
+                        throw parse_exception(
+                            tok->pos,
+                            "expected literal for case clause header");
+                }
+            }
+
+            tok_expect(reader.pop(), SYMBOL_COLON);
+            if (reader.peek().is_a(TOKEN_LINE_END))
+                reader.pop();
+
+            // read clause statements until end of case or new clause header
+            while (true) {
+                tok = &reader.peek();
+                if (tok->is_word(WORD_ID_END)) break;
+                if (reader.peek(1).is_symbol(SYMBOL_COLON)) break;
+
+                cur_clause->branch.push_back(parse_statement(reader, scope));
+            }
+
+            if (is_otherwise) {
+                tok_expect(reader.pop(), WORD_ID_END);
+                tok_expect(reader.pop(), WORD_ID_CASE);
+                tok_expect(reader.pop(), TOKEN_LINE_END);
+
+                stm->has_otherwise = true;
+                stm->otherwise_clause = std::move(cur_clause->branch);
+                break;
+            } else {
+                stm->clauses.push_back(std::move(cur_clause));
+            }
+        }
+
+        return stm;
 
     // a statement which is formatted like this
     //   <ident> [arg1 [, arg2 [, arg3 ...]]]

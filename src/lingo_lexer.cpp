@@ -65,7 +65,6 @@ static const std::unordered_map<std::string, token_word_id> str_to_word_id = {
     { "to", WORD_ID_TO },
     { "down", WORD_ID_DOWN },
     { "while", WORD_ID_WHILE },
-    { "switch", WORD_ID_SWITCH },
     { "case", WORD_ID_CASE },
     { "otherwise", WORD_ID_OTHERWISE },
     { "the", WORD_ID_THE },
@@ -117,7 +116,7 @@ token token::make_float(double v, const pos_info &pos) {
     return tok;
 }
 
-token token::make_word(const std::string v, const pos_info &pos) {
+token token::make_word(const std::string &v, const pos_info &pos) {
     token_word_id word_id = WORD_ID_UNKNOWN;
     const auto &word_id_it = str_to_word_id.find(v);
     if (word_id_it != str_to_word_id.end()) {
@@ -127,7 +126,7 @@ token token::make_word(const std::string v, const pos_info &pos) {
     token tok;
     tok.pos = pos;
     tok.type = TOKEN_WORD;
-    tok.str = std::move(v);
+    tok.str = v;
     tok.word_id = word_id;
     return tok;
 }
@@ -141,11 +140,19 @@ token token::make_word(token_word_id word_id, const pos_info &pos) {
     return tok;
 }
 
-token token::make_string(const std::string v, const pos_info &pos) {
+token token::make_string(const std::string &v, const pos_info &pos) {
     token tok;
     tok.pos = pos;
     tok.type = TOKEN_STRING;
-    tok.str = std::move(v);
+    tok.str = v;
+    return tok;
+}
+
+token token::make_symbol_literal(const std::string &v, const pos_info &pos) {
+    token tok;
+    tok.pos = pos;
+    tok.type = TOKEN_SYMBOL_LITERAL;
+    tok.str = v;
     return tok;
 }
 
@@ -260,6 +267,7 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
 
     char ch = (char)stream.get();
     bool num_is_float = false;
+    bool make_symlit = false;
     std::string strbuf;
     token_symbol tmp_symbol = SYMBOL_INVALID;
 
@@ -330,6 +338,8 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                 break;
 
             case MODE_NUMBER:
+                make_symlit = false;
+
                 if (!isalnum(ch) && ch != '.') {
                     wordbuf[wordbuf_i++] = '\0';
 
@@ -378,7 +388,6 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     wordbuf[wordbuf_i++] = ch;
                     next_char();
                 }
-
                 break;
 
             case MODE_WORD:
@@ -387,21 +396,26 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     wordbuf[wordbuf_i++] = '\0';
 
                     token_keyword kw;
-                    if (identify_keyword(wordbuf, kw)) {
+                    if (make_symlit) {
+                        tokens.push_back(token::make_symbol_literal(wordbuf, word_pos));
+                    } else if (identify_keyword(wordbuf, kw)) {
                         tokens.push_back(token::make_keyword(kw, word_pos));
                     } else {
                         tokens.push_back(token::make_word(wordbuf, word_pos));
                     }
 
                     parse_mode = MODE_NONE;
+                    make_symlit = false;
                 } else {
                     wordbuf[wordbuf_i++] = ch;
                     next_char();
                 }
-
+                
                 break;
 
             case MODE_SYMBOL: {
+                make_symlit = false;
+
                 wordbuf[wordbuf_i] = ch;
                 wordbuf[++wordbuf_i] = '\0';
 
@@ -420,6 +434,8 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
                     if (tmp_symbol == SYMBOL_COMMENT) {
                         // discard rest of line as it is a comment line
                         while (ch != '\n') next_char();
+                    } else if (tmp_symbol == SYMBOL_POUND) {
+                        make_symlit = true;
                     } else {
                         tokens.push_back(token::make_symbol(tmp_symbol, word_pos));
                     }
@@ -434,6 +450,8 @@ bool lingo::ast::parse_tokens(std::istream &stream, std::vector<token> &tokens,
             }
 
             case MODE_STRING:
+                make_symlit = false;
+
                 if (ch == '"') {
                     tokens.push_back(token::make_string(strbuf, word_pos));
                     parse_mode = MODE_NONE;

@@ -26,6 +26,7 @@ namespace lingo {
             TOKEN_INTEGER,
             TOKEN_WORD,
             TOKEN_STRING,
+            TOKEN_SYMBOL_LITERAL,
             TOKEN_LINE_END
         };
 
@@ -51,7 +52,6 @@ namespace lingo {
             WORD_ID_TO,
             WORD_ID_DOWN,
             WORD_ID_WHILE,
-            WORD_ID_SWITCH,
             WORD_ID_CASE,
             WORD_ID_OTHERWISE,
             WORD_ID_THE,
@@ -126,9 +126,10 @@ namespace lingo {
             static token make_integer(int32_t v, const pos_info &pos);
             static token make_symbol(token_symbol v, const pos_info &pos);
             static token make_float(double v, const pos_info &pos);
-            static token make_word(const std::string v, const pos_info &pos);
+            static token make_word(const std::string &v, const pos_info &pos);
             static token make_word(token_word_id word_id, const pos_info &pos);
-            static token make_string(const std::string v, const pos_info &pos);
+            static token make_string(const std::string &v, const pos_info &pos);
+            static token make_symbol_literal(const std::string &v, const pos_info &pos);
             static token make_line_end(const pos_info &pos);
 
             constexpr bool is_keyword(token_keyword v) const noexcept {
@@ -167,6 +168,9 @@ namespace lingo {
             
                 case TOKEN_STRING:
                     return "string";
+                
+                case TOKEN_SYMBOL_LITERAL:
+                    return "symbol-literal";
             
                 case TOKEN_LINE_END:
                     return "newline";
@@ -378,7 +382,7 @@ namespace lingo {
             STATEMENT_NEXT_REPEAT, // aka continue
             STATEMENT_PUT,
             STATEMENT_PUT_ON,
-            STATEMENT_SWITCH
+            STATEMENT_CASE
         };
 
         struct ast_statement {
@@ -468,6 +472,21 @@ namespace lingo {
             std::unique_ptr<ast_expr> expr;
             std::unique_ptr<ast_expr> target; // after/before X syntax
             bool before; // true if before, false if after
+        };
+
+        struct ast_case_clause {
+            std::unique_ptr<ast_expr> literal;
+            std::vector<std::unique_ptr<ast_statement>> branch;
+        };
+
+        struct ast_statement_case : public ast_statement {
+            inline ast_statement_case() { type = STATEMENT_CASE; }
+
+            std::unique_ptr<ast_expr> expr;
+            std::vector<std::unique_ptr<ast_case_clause>> clauses;
+
+            bool has_otherwise;
+            std::vector<std::unique_ptr<ast_statement>> otherwise_clause;
         };
 
         // AST root
