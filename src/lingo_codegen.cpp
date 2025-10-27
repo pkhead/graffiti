@@ -669,7 +669,8 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
             auto data = static_cast<ast::ast_statement_return*>(stm.get());
 
             tmp_stream << "return ";
-            generate_expr(data->expr, tmp_stream, expr_ctx);
+            if (data->expr)
+                generate_expr(data->expr, tmp_stream, expr_ctx);
 
             body_contents << tmp_stream.rdbuf() << "\n";
             break;
