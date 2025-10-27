@@ -696,11 +696,11 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                 generate_expr(data->index_to, ostream, ctx);
                 ostream << "))";
             } else {
-                ostream << "((";
+                ostream << "(";
                 generate_expr(data->expr, ostream, ctx);
                 ostream << ")[";
                 generate_expr(data->index_from, ostream, ctx);
-                ostream << "])";
+                ostream << "]";
             }
 
             break;
@@ -1079,7 +1079,7 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
                     if (is_first)
                         tmp_stream << "if ";
                     else
-                        tmp_stream << "elif ";
+                        tmp_stream << "elseif ";
 
                     bool insert_or = false;
                     for (auto &check : clause->literal) {
