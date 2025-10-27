@@ -1,21 +1,45 @@
 #include <iostream>
 #include <fstream>
-#include <vector>
+#include <cstring>
 #include "lingo.hpp"
 
 int main(int argc, const char *argv[]) {
-    if (argc == 1) {
-        std::cerr << "expected filename as first argument\n";
+    if (argc < 3) {
+        std::cerr << "error: invalid arguments\nexpected format: evillingo [input] [output]\n";
         return 2;
     }
 
-    std::ifstream stream(argv[1]);
-    if (!stream.is_open()) {
-        std::cerr << "could not open file " << argv[1] << "\n";
+    bool use_cin = !strcmp(argv[1], "-");
+    bool use_cout = !strcmp(argv[2], "-");
+
+    std::unique_ptr<std::istream> istream;
+    if (use_cin) {
+        istream = std::make_unique<std::istream>(std::cin.rdbuf());
+    } else {
+        auto fstream = new std::ifstream(argv[1]);
+        if (!fstream->is_open()) {
+            std::cerr << "could not open file " << argv[1] << "\n";
+            delete fstream;
+        }
+
+        istream = std::unique_ptr<std::istream>(fstream);
+    }
+
+    std::unique_ptr<std::ostream> ostream;
+    if (use_cout) {
+        ostream = std::make_unique<std::ostream>(std::cout.rdbuf());
+    } else {
+        auto fstream = new std::ofstream(argv[2]);
+        if (!fstream->is_open()) {
+            std::cerr << "could not open file " << argv[2] << "\n";
+            delete fstream;
+        }
+
+        ostream = std::unique_ptr<std::ostream>(fstream);
     }
 
     lingo::parse_error error;
-    if (!lingo::compile_luajit_text(stream, std::cout, &error)) {
+    if (!lingo::compile_luajit_text(*istream, *ostream, &error)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
     }
