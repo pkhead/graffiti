@@ -475,7 +475,7 @@ namespace lingo {
         };
 
         struct ast_case_clause {
-            std::unique_ptr<ast_expr> literal;
+            std::vector<std::unique_ptr<ast_expr>> literal;
             std::vector<std::unique_ptr<ast_statement>> branch;
         };
 

@@ -1175,35 +1175,44 @@ parse_statement(token_reader &reader, handler_scope &scope) {
             } else {
                 is_otherwise = false;
 
-                switch (tok->type) {
-                    case TOKEN_INTEGER:
-                        cur_clause->literal =
-                            MAKE_INT(tok->pos, tok->integer);
+                while (true) {
+                    switch (tok->type) {
+                        case TOKEN_INTEGER:
+                            cur_clause->literal.push_back(
+                                MAKE_INT(tok->pos, tok->integer));
+                            break;
+                        
+                        case TOKEN_FLOAT:
+                            cur_clause->literal.push_back(
+                                MAKE_FLOAT(tok->pos, tok->number));
+                            break;
+                        
+                        case TOKEN_STRING:
+                            cur_clause->literal.push_back(
+                                MAKE_STRING(tok->pos, tok->str));
+                            break;
+                        
+                        case TOKEN_SYMBOL_LITERAL:
+                            cur_clause->literal.push_back(
+                                MAKE_SYMBOL(tok->pos, tok->str));
+                            break;
+                        
+                        default:
+                            throw parse_exception(
+                                tok->pos,
+                                "expected literal for case clause header");
+                    }
+
+                    tok = &reader.pop();
+                    if (tok->is_symbol(SYMBOL_COLON))
                         break;
-                    
-                    case TOKEN_FLOAT:
-                        cur_clause->literal =
-                            MAKE_FLOAT(tok->pos, tok->integer);
-                        break;
-                    
-                    case TOKEN_STRING:
-                        cur_clause->literal =
-                            MAKE_STRING(tok->pos, tok->str);
-                        break;
-                    
-                    case TOKEN_SYMBOL_LITERAL:
-                        cur_clause->literal =
-                            MAKE_SYMBOL(tok->pos, tok->str);
-                        break;
-                    
-                    default:
-                        throw parse_exception(
-                            tok->pos,
-                            "expected literal for case clause header");
+    
+                    tok_expect(*tok, SYMBOL_COMMA);
+                    tok = &reader.pop();
                 }
             }
 
-            tok_expect(reader.pop(), SYMBOL_COLON);
+            // line end is optional
             if (reader.peek().is_a(TOKEN_LINE_END))
                 reader.pop();
 
@@ -1211,7 +1220,11 @@ parse_statement(token_reader &reader, handler_scope &scope) {
             while (true) {
                 tok = &reader.peek();
                 if (tok->is_word(WORD_ID_END)) break;
-                if (reader.peek(1).is_symbol(SYMBOL_COLON)) break;
+                if (reader.peek(1).is_symbol(SYMBOL_COLON) ||
+                    reader.peek(1).is_symbol(SYMBOL_COMMA))
+                {
+                    break;
+                }
 
                 cur_clause->branch.push_back(parse_statement(reader, scope));
             }

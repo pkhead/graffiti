@@ -909,12 +909,22 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
                 bool is_first = true;
                 for (auto &clause : data->clauses) {
                     if (is_first)
-                        tmp_stream << "if";
+                        tmp_stream << "if ";
                     else
-                        tmp_stream << "elif";
+                        tmp_stream << "elif ";
 
-                    tmp_stream << " case == ";
-                    generate_expr(clause->literal, tmp_stream, expr_ctx);
+                    bool insert_or = false;
+                    for (auto &check : clause->literal) {
+                        if (insert_or) {
+                            tmp_stream << " or ";
+                        }
+
+                        tmp_stream << "(case == ";
+                        generate_expr(check, tmp_stream, expr_ctx);
+                        tmp_stream << ")";
+
+                        insert_or = true;
+                    }
                     tmp_stream << " then\n";
 
                     for (auto &child_stm : clause->branch) {
