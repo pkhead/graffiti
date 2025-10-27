@@ -7,6 +7,165 @@
 
 using namespace lingo;
 
+static constexpr char ESC = '\x1b';
+
+// middle-man for a basic_ostream in order to control which lines Lua statements
+// appear in.
+// - when writing a newline, it will instead put a whitespace character
+// - <ESC>(number)L to move to a line
+// - <ESC>OL to disable line alignment*
+// - <ESC>IL to disable line alignment*
+//
+// *this is to prevent an error from happening when generating an expression
+//  from an earlier line (ie the iterator statement at the end of a repeat for)
+class lua_writer : public std::basic_ostream<char> {
+public:
+    class streambuf : public std::streambuf {
+    private:
+        std::streambuf *real_buf;
+        int cur_line = 1;
+        
+        bool esc_mode = false;
+        int escbuf_ptr = 0;
+        char escbuf[16];
+        bool enabled = true;
+
+        inline bool esc_mode_push(char_type ch) {
+            if (ch == 'L') {
+                escbuf[escbuf_ptr] = '\0';
+
+                if (!strcmp(escbuf, "I")) {
+                    enabled = true;
+                }
+                else if (!strcmp(escbuf, "O")) {
+                    enabled = false;
+                }
+                else if (enabled) {
+                    int l = atoi(escbuf);
+                    if (!go_to_line(l))
+                        return false;
+                }
+
+                esc_mode = false;
+                escbuf_ptr = 0;
+            } else {
+                escbuf[escbuf_ptr++] = ch;
+            }
+
+            return true;
+        }
+
+        static constexpr size_t buffer_size = 1024;
+        char_type buffer[buffer_size+1];
+
+    protected:
+        bool process(const char_type *s, std::streamsize count) {
+            std::streamsize i = 0;
+
+            for (std::streamsize j = 0; j < count; ++j) {
+                if (esc_mode) {
+                    i = j + 1;
+                    if (!esc_mode_push(s[j]))
+                        return false;
+                } else if (s[j] == '\n') {
+                    if (j > i) {
+                        ptrdiff_t cnt = j - i;
+                        if (real_buf->sputn(s + i, cnt) != cnt)
+                            return false;
+                    }
+
+                    if (!real_buf->sputc(enable_line_intercept ? '\t' : '\n'))
+                        return false;
+
+                    i = j + 1;
+                } else if (s[j] == '\x1B') {
+                    if (j > i) {
+                        ptrdiff_t cnt = j - i;
+                        if (real_buf->sputn(s + i, cnt) != cnt)
+                            return false;
+                    }
+
+                    esc_mode = true;
+                }
+            }
+
+            if (!esc_mode && i < count) {
+                ptrdiff_t cnt = count - i;
+                if (real_buf->sputn(s + i, count - i) != cnt)
+                    return false;
+            }
+            
+            return true;
+        }
+
+        int sync() override {
+            char_type *ptr = pbase();
+            ptrdiff_t count = pptr() - ptr;
+
+            return (count == 0 || process(ptr, count)) ? 0 : -1;
+        }
+
+        int_type overflow(int_type ch) override {
+            char_type *endp = pptr();
+            char_type *basep = pbase();
+
+            if (ch != EOF) {
+                *(endp++) = (char_type)ch;
+            }
+
+            ptrdiff_t count = endp - basep;
+            if (!process(basep, count)) {
+                ch = EOF;
+            } else if (ch == EOF) {
+                ch = 0;
+            }
+
+            setp(buffer, buffer + buffer_size);
+
+            return ch;
+        }
+
+        bool go_to_line(int line) {
+            if (line < cur_line)
+                throw std::runtime_error("cannot go to a previous line");
+
+            if (line == cur_line) return true;
+
+            if (enable_line_intercept) {
+                for (; cur_line < line; ++cur_line) {
+                    if (real_buf->sputc('\n') == EOF)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+    public:
+        streambuf(std::streambuf *real_buf) : real_buf(real_buf), cur_line(1) {
+            setg(nullptr, nullptr, nullptr);
+            setp(buffer, buffer + buffer_size);
+        }
+
+        bool enable_line_intercept = true;
+    };
+
+    streambuf buf;
+public:
+    lua_writer(std::basic_ostream<char> &ostream)
+        : buf(ostream.rdbuf()), std::basic_ostream<char>(&buf)
+    { }
+
+    inline void line_intercept(bool v) {
+        buf.enable_line_intercept = v;
+    }
+};
+
+// static int _dbg_last_line = 0;
+// #define SET_LINE(line) ESC << (assert((line) >= _dbg_last_line), _dbg_last_line = (line)) << 'L'
+#define SET_LINE(line) ESC << (line) << 'L'
+#define LINECTL(v) ESC << (v) << 'L'
+
 class gen_exception : public std::runtime_error {
 public:
     pos_info pos;
@@ -178,6 +337,8 @@ static bool get_handler_ref(const std::string &name, std::ostream &ostream,
 
 static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                           std::ostream &ostream, expr_gen_ctx &ctx) {
+    ostream << SET_LINE(expr->pos.line);
+
     switch (expr->type) {
         case ast::EXPR_LITERAL: {
             auto data = static_cast<ast::ast_expr_literal*>(expr.get());
@@ -619,6 +780,8 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
         return tmp.name + " ~= 0 and " + tmp.name + " ~= nil";
     };
 
+    body_contents << SET_LINE(stm->pos.line);
+
     switch (stm->type) {
         case ast::STATEMENT_EXPR: {
             auto data = static_cast<ast::ast_statement_expr*>(stm.get());
@@ -855,9 +1018,11 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
 
             tmp_stream << "::nextrepeat::\n";
 
+            tmp_stream << LINECTL("O");
             generate_expr(data->iterator, tmp_stream, expr_ctx);
             tmp_stream << " = ";
             generate_expr(data->iterator, tmp_stream, expr_ctx);
+            tmp_stream << LINECTL("I");
 
             if (data->down) {
                 tmp_stream << " - 1";
@@ -963,6 +1128,7 @@ static void generate_func(std::ostream &stream,
                           gen_script_scope &script_scope) {
     gen_handler_scope scope(script_scope);
 
+    stream << SET_LINE(handler.pos.line);
     stream << "function script." << handler.name << "(self";
 
     // write and register parameter names
@@ -1059,8 +1225,12 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
 
 bool codegen::generate_luajit_text(const ast::ast_root &root,
                                    std::ostream &stream, parse_error *error) {
+    lua_writer lwriter(stream);
+    // _dbg_last_line = 1;
+    // lwriter.line_intercept(false);
+    
     try {
-        generate_script(root, stream);
+        generate_script(root, lwriter);
     } catch (gen_exception except) {
         if (error) {
             *error = parse_error { except.pos, except.msg };
@@ -1069,6 +1239,7 @@ bool codegen::generate_luajit_text(const ast::ast_root &root,
         return false;
     }
 
+    lwriter.flush();
     return true;
 }
 
