@@ -9,16 +9,36 @@ int main(int argc, const char *argv[]) {
         return 2;
     }
 
-    bool use_cin = !strcmp(argv[1], "-");
-    bool use_cout = !strcmp(argv[2], "-");
+    int file_index = 0;
+    const char *files[] = {nullptr, nullptr};
+    bool no_line_numbers = false;
+
+    for (int i = 1; i < argc; ++i) {
+        const char *arg = argv[i];
+        
+        if (!strcmp(arg, "--no-line-numbers")) {
+            no_line_numbers = true;
+        }
+        else {
+            if (file_index >= 2) {
+                std::cerr << "no more files please";
+                return 2;
+            }
+
+            files[file_index++] = arg;
+        }
+    }
+
+    bool use_cin = !strcmp(files[0], "-");
+    bool use_cout = !strcmp(files[1], "-");
 
     std::unique_ptr<std::istream> istream;
     if (use_cin) {
         istream = std::make_unique<std::istream>(std::cin.rdbuf());
     } else {
-        auto fstream = new std::ifstream(argv[1]);
+        auto fstream = new std::ifstream(files[0]);
         if (!fstream->is_open()) {
-            std::cerr << "could not open file " << argv[1] << "\n";
+            std::cerr << "could not open file " << files[0] << "\n";
             delete fstream;
         }
 
@@ -29,9 +49,9 @@ int main(int argc, const char *argv[]) {
     if (use_cout) {
         ostream = std::make_unique<std::ostream>(std::cout.rdbuf());
     } else {
-        auto fstream = new std::ofstream(argv[2]);
+        auto fstream = new std::ofstream(files[1]);
         if (!fstream->is_open()) {
-            std::cerr << "could not open file " << argv[2] << "\n";
+            std::cerr << "could not open file " << files[1] << "\n";
             delete fstream;
         }
 
@@ -39,7 +59,10 @@ int main(int argc, const char *argv[]) {
     }
 
     lingo::parse_error error;
-    if (!lingo::compile_luajit_text(*istream, *ostream, &error)) {
+    lingo::extra_gen_params params;
+    params.no_line_numbers = no_line_numbers;
+
+    if (!lingo::compile_luajit_text(*istream, *ostream, &error, &params)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
     }

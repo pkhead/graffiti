@@ -156,7 +156,7 @@ public:
         : buf(ostream.rdbuf()), std::basic_ostream<char>(&buf)
     { }
 
-    inline void line_intercept(bool v) {
+    inline void set_line_intercept(bool v) {
         buf.enable_line_intercept = v;
     }
 };
@@ -1224,10 +1224,12 @@ static void generate_script(const ast::ast_root &root, std::ostream &stream) {
 }
 
 bool codegen::generate_luajit_text(const ast::ast_root &root,
-                                   std::ostream &stream, parse_error *error) {
+                                   std::ostream &stream, parse_error *error,
+                                   extra_gen_params *params) {
     lua_writer lwriter(stream);
     // _dbg_last_line = 1;
-    // lwriter.line_intercept(false);
+    if (params)
+        lwriter.set_line_intercept(!params->no_line_numbers);
     
     try {
         generate_script(root, lwriter);
@@ -1252,7 +1254,7 @@ bool codegen::generate_luajit_text(const ast::ast_root &root,
 
 
 bool lingo::compile_luajit_text(std::istream &istream, std::ostream &ostream,
-                                parse_error *error) {
+                                parse_error *error, extra_gen_params *params) {
     std::vector<lingo::ast::token> tokens;
     lingo::parse_error err;
     if (!lingo::ast::parse_tokens(istream, tokens, &err)) {
@@ -1311,7 +1313,7 @@ bool lingo::compile_luajit_text(std::istream &istream, std::ostream &ostream,
         return false;
     }
 
-    if (!lingo::codegen::generate_luajit_text(script_tree, ostream, &err)) {
+    if (!lingo::codegen::generate_luajit_text(script_tree, ostream, &err, params)) {
         if (error) *error = err;
         return false;
     }

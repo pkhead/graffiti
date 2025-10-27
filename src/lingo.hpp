@@ -508,11 +508,17 @@ namespace lingo {
                        parse_error *error);
     } // namespace ast
 
+    struct extra_gen_params {
+        bool no_line_numbers = false;
+    };
+
     namespace codegen {
         bool generate_luajit_text(const ast::ast_root &root,
-                                  std::ostream &stream, parse_error *error);
+                                  std::ostream &stream, parse_error *error,
+                                  extra_gen_params *params);
     }
 
     bool compile_luajit_text(std::istream &istream, std::ostream &ostream,
-                             parse_error *error);
+                             parse_error *error,
+                             extra_gen_params *params = nullptr);
 } // namespace lingo
