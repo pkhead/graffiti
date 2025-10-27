@@ -153,6 +153,8 @@ static bool get_handler_ref(const std::string &name, std::ostream &ostream,
         { "sin", "math.sin" },
         { "sqrt", "math.sqrt" },
 
+        { "string", "tostring" },
+
         { "rect", "lingo.rect" },
         { "point", "lingo.point" },
         { "member", "member" },
