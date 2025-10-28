@@ -1172,6 +1172,7 @@ parse_statement(token_reader &reader, handler_scope &scope) {
             tok = &reader.pop();
             if (tok->is_word(WORD_ID_OTHERWISE)) {
                 is_otherwise = true;
+                tok_expect(reader.pop(), SYMBOL_COLON);
             } else {
                 is_otherwise = false;
 

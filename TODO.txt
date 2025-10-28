@@ -2,6 +2,8 @@
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
 
+- TODO: generator tmpvar support for do...end blocks ???
+        or maybe i can get away with declaring new local var on every do block i mean yea
 - TODO: psuedo-indicies (done in ast generation):
     A.float -> lruntime.psuedo.float(A)
     A.lines[B] -> lruntime.psuedo.str_line(A, B)

@@ -409,9 +409,9 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
                 case ast::EXPR_THE_DIR_SEPARATOR:
                     #ifdef _WIN32
-                    ostream << "\\";
+                    ostream << "\"\\\\\"";
                     #else
-                    ostream << "/";
+                    ostream << "\"/\"";
                     #endif
                     break;
 
@@ -772,8 +772,8 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
         generate_expr(cond, tmp_stream, expr_ctx);
         tmp_stream << "\n";
         tmp_stream << "if " << tmp.name << " ~= nil and "
-            << "type(" << tmp.name << ") ~= \"number\" or "
-            << "math.floor(" << tmp.name << ") ~= " << tmp.name << " then\n"
+            << "(type(" << tmp.name << ") ~= \"number\" or "
+            << "math.floor(" << tmp.name << ") ~= " << tmp.name << ") then\n"
             << "error(\"expected integer or void, got \" .. type(" << tmp.name << "))\n"
             << "end\n";
         

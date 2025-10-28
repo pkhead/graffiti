@@ -1,9 +1,119 @@
+#include <lua.hpp>
 #include <iostream>
+#include <istream>
 #include <fstream>
-#include <cstring>
-#include "lingo.hpp"
+#include <sstream>
+#include <stdexcept>
+#include "lingo/lingo.hpp"
 
-int main(int argc, const char *argv[]) {
+static int lua_load_lingo(lua_State *L, std::istream &istream, const char *chunk_name) {
+    std::stringstream ostream;
+    lingo::parse_error error;
+    if (!lingo::compile_luajit_text(istream, ostream, &error)) {
+        static char buf[256];
+        const char *fmt;
+        const char *nm = chunk_name;
+        if (chunk_name[0] == '@' || chunk_name[0] == '=') {
+            fmt = "%s:%i: %s";
+            ++nm;
+        } else if (strlen(chunk_name) >= 48) {
+            fmt = "[string \"%.45s...\"]:%i: %s";
+        } else {
+            fmt = "[string \"%s\"]:%i: %s";
+        }
+
+        snprintf(buf, 256, fmt, nm, error.pos.line, error.errmsg.c_str());
+        lua_pushstring(L, buf);
+        return LUA_ERRSYNTAX;
+    } else {
+        std::string lua_code = ostream.str();
+        return luaL_loadbuffer(L, lua_code.c_str(), lua_code.size(), chunk_name);
+    }
+}
+
+class luawrap_State {
+public:
+    lua_State *ptr;
+    inline constexpr luawrap_State(lua_State *ptr) noexcept : ptr(ptr)
+    { }
+
+    operator lua_State*() const { return ptr; }
+
+    inline ~luawrap_State() {
+        lua_close(ptr);
+    }
+};
+
+static void set_up_globals(lua_State *L) {
+    luaL_dostring(L, R"lua(
+        lingo = {}
+        lingo.globals = {}
+        lingo.runtime = {}
+        local lruntime = lingo.runtime
+
+        local builtin_handlers = {
+            readinput = function()
+                return io.read("*l")
+            end
+        }
+        
+        function call_handler(hname, ...)
+            local h = builtin_handlers[hname]
+            if h then
+                return h(...)
+            else
+                error(("unknown handler '%s'"):format(hname), 2)
+            end
+        end
+
+        function lruntime.to_string(n)
+            if n == nil then
+                return ""
+            else
+                return tostring(n)
+            end
+        end
+
+        function lruntime.logical_and(a, b)
+            if (a ~= 0 and a ~= nil) and (b ~= 0 and b ~= nil) then
+                return 1
+            else
+                return 0
+            end
+        end
+
+        function lruntime.logical_or(a, b)
+            if (a ~= 0 and a ~= nil) or (b ~= 0 and b ~= nil) then
+                return 1
+            else
+                return 0
+            end
+        end
+
+        function lruntime.logical_not(a)
+            if not (a ~= 0 and a ~= nil) then
+                return 1
+            else
+                return 0
+            end
+        end
+
+        function lruntime.bool_to_int(v)
+            if v then
+                return 1
+            else
+                return 0
+            end
+        end
+    )lua");
+}
+
+static int lua_panic(lua_State *L) {
+    throw std::runtime_error(lua_tostring(L, -1));
+    return 0;
+}
+
+int lingo_compiler_test(int argc, const char *argv[]) {
     if (argc < 3) {
         std::cerr << "error: invalid arguments\nexpected format: evillingo [input] [output]\n";
         return 2;
@@ -110,6 +220,45 @@ int main(int argc, const char *argv[]) {
     // auto thing = static_cast<lingo::ast::ast_handler_definition*>(statements[0].get());
     // std::cout << statements.size() << "\n";
     // std::cout << thing->params.size() << "\n";
+
+    return 0;
+}
+
+int main(int argc, const char *argv[]) {
+    if (argc > 1) {
+        return lingo_compiler_test(argc, argv);
+    }
+    
+    luawrap_State L(lua_open());
+    lua_atpanic(L, lua_panic);
+    luaL_openlibs(L);
+    set_up_globals(L);
+    
+    {
+        constexpr const char *FILE_NAME = "input.ls";
+        std::ifstream f(FILE_NAME);
+        if (!f.is_open()) {
+            std::cerr << "could not open " << FILE_NAME << "\n";
+            return 1;
+        }
+
+        std::string chunk_name = std::string("@") + FILE_NAME;
+        if (lua_load_lingo(L, f, chunk_name.c_str()) != LUA_OK) {
+            std::cerr << lua_tostring(L, -1);
+            return 1;
+        }
+    }
+
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        std::cerr << lua_tostring(L, -1);
+        return 1;
+    }
+
+    lua_getfield(L, -1, "main");
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        std::cerr << lua_tostring(L, -1);
+        return 1;
+    }
 
     return 0;
 }
