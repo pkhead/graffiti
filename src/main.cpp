@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include "lingo/lingo.hpp"
 
+constexpr const char* MT_LIST = "linear list";
+constexpr const char* MT_PROP_LIST = "property list";
+
 static int lua_load_lingo(lua_State *L, std::istream &istream, const char *chunk_name) {
     std::stringstream ostream;
     lingo::parse_error error;
@@ -41,6 +44,27 @@ public:
 
     inline ~luawrap_State() {
         lua_close(ptr);
+    }
+};
+
+struct lua_linear_list {
+    int tref;
+    int length;
+
+    lua_linear_list(lua_State *L) {
+        lua_newtable(L);
+        tref = luaL_ref(L, LUA_REGISTRYINDEX);
+        length = 0;
+    }
+
+    void release(lua_State *L) {
+        luaL_unref(L, LUA_REGISTRYINDEX, tref);
+        tref = 0;
+        length = 0;
+    }
+
+    inline constexpr void push_table(lua_State *L) const {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, tref);
     }
 };
 
@@ -105,7 +129,109 @@ static void set_up_globals(lua_State *L) {
                 return 0
             end
         end
+
+        -- TODO: holes can probably exist in lingo lists so probably should use
+        -- either a userdata, or store length alongside table ... in which case
+        -- i should use a userdata anyway so that client code can't pairs
+        -- through the thing.
+        local lingo_list_mt = {}
+        lingo_list_mt.funcs = {
+            add = function(self, v)
+                rawset(self, #self+1, v)
+            end
+        }
+
+        function lingo_list_mt.__index(t,k)
+            local f = lingo_list_mt.funcs[k]
+            if f then
+                return f
+            end
+
+            if k == "length" then
+                return #t
+            end
+            
+            error("key does not exist", 2)
+        end
+
+        function lingo_list_mt.__newindex(t,k,v)
+            error("key does not exist", 2)
+        end
+
+        lingo_list_mt.__metatable = "The metatable is locked"
+
+        function lingo.list(...)
+            return setmetatable({...}, lingo_list_mt)
+        end
     )lua");
+
+    // set up linear list metatable
+    luaL_newmetatable(L, MT_LIST);
+
+    // __gc
+    lua_pushcfunction(L, [](lua_State *L) -> int {
+        lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
+        list->release(L);
+        list->~lua_linear_list();
+        return 0;
+    });
+    lua_setfield(L, -2, "__gc");
+
+    // __index
+    lua_pushcfunction(L, [](lua_State *L) {
+        lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
+
+        if (lua_isnumber(L, 2)) {
+            int n = (int)luaL_checkinteger(L, 2) - 1;
+            if (n < 0 || n >= list->length) {
+                return luaL_error(L, "index out of range");
+            }
+
+            list->push_table(L);
+            lua_rawgeti(L, -1, n);
+            return 1;
+        }
+
+        const char *k = luaL_checkstring(L, 2);
+
+        if (!strcmp(k, "length")) {
+            lua_pushnumber(L, (lua_Number)list->length);
+            return 1;
+        }
+
+        if (!strcmp(k, "add")) {
+            lua_pushcfunction(L, [](lua_State *L) -> {
+                lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
+                list->push_table(L);
+                lua_pushvalue(L, 2);
+                lua_rawseti(L, -2)
+            });
+            return 1;
+        }
+        return 0;
+    });
+
+    lua_pushstring(L, "The metatable is locked.");
+    lua_setfield(L, -2, "__metatable");
+
+    // lingo.list
+    lua_pushcfunction(L, [](lua_State *L) -> int {
+        int argn = lua_gettop(L);
+
+        lua_linear_list *list = (lua_linear_list*)lua_newuserdata(L, sizeof(lua_linear_list));
+        new(&list) lua_linear_list(L);
+        luaL_getmetatable(L, MT_LIST);
+        lua_setmetatable(L, -2);
+
+        list->push_table(L);
+        for (int i = 1; i <= argn; ++i) {
+            lua_pushvalue(L, i);
+            lua_rawseti(L, -2, i);
+        }
+        lua_pop(L, 1); // pop table
+
+        return 1;
+    });
 }
 
 static int lua_panic(lua_State *L) {
@@ -228,7 +354,7 @@ int main(int argc, const char *argv[]) {
     if (argc > 1) {
         return lingo_compiler_test(argc, argv);
     }
-    
+
     luawrap_State L(lua_open());
     lua_atpanic(L, lua_panic);
     luaL_openlibs(L);
