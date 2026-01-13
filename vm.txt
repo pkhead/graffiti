@@ -1,0 +1,30 @@
+== VM documentation ==
+
+each execution frame will store:
+- a stack of values
+- a list of function parameters and local variables. Function parameters are
+  stored first. First index is always "me". function struct will store the
+  number of variables the frame will need.
+- a list of constants: integers, floats, strings, and symbols. from the
+  function struct.
+
+types:
+0 - void
+1 - integer (32-bit integer)
+2 - float (64-bit float)
+3 - string (reference type)
+4 - symbol (reference type)
+5 - linear list (reference type)
+6 - property list (reference type)
+7 - point (reference type)
+8 - quad (reference type)
+
+"the" values
+0 - the moviePath
+1 - the frame
+2 - the dirSeparator
+3 - the milliseconds
+4 - the randomSeed
+5 - the platform
+
+each instruction is 4 bytes long. The first byte will always be the opcode.
