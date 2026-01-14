@@ -35,3 +35,22 @@ Non-goals:
   - I think Drizzle is fast enough without GPU. The bottleneck is effects.
     Most effects can only be run in serial because of feedback.
 - Rewriting the editor/renderer.
+
+## Building
+Requirements:
+- C++17 compiler
+- Meson build system
+
+Setup:
+```bash
+meson setup builddir
+```
+Compile:
+```bash
+meson compile -C builddir
+```
+Run:
+```bash
+# parse input.ls and print result to stdout
+builddir/graffiti input.ls -
+```
