@@ -73,6 +73,7 @@ int lingo_compiler_test(int argc, const char *argv[]) {
     const lingo::bc::chunk_header *chunk = (lingo::bc::chunk_header *)chunks[0].data();
     const lingo::bc::instr *code = lingo::bc::base_offset(chunk, chunk->instrs);
     const lingo::bc::chunk_const *consts = lingo::bc::base_offset(chunk, chunk->consts);
+    const lingo::bc::chunk_const_str **lnames = lingo::bc::base_offset(chunk, chunk->local_names);
     const lingo::bc::chunk_const_str *strpool = lingo::bc::base_offset(chunk, chunk->string_pool);
     
     std::cout << "\tCONSTS:\n";
@@ -106,6 +107,17 @@ int lingo_compiler_test(int argc, const char *argv[]) {
                 printf("???\n");
                 break;
         }
+    }
+
+    std::cout << "\tLOCALS:\n";
+    for (int i = 0; i < chunk->nargs + chunk->nlocals; ++i) {
+        const lingo::bc::chunk_const_str *name_ref = lingo::bc::base_offset(strpool, lnames[i]);
+        printf("%i - %s", i, &name_ref->first);
+
+        if (i < chunk->nargs)
+            printf(" (param)\n");
+        else
+            printf("\n");
     }
 
     std::cout << "\tDISASM:\n";

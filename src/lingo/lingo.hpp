@@ -582,11 +582,13 @@ namespace lingo {
             OP_NEWLLIST,// [u16]      Push a newly constructed empty linear
                         //            list with a given number of pre-allocated.
                         //            elements.
-            OP_NEWPLIST,//            Push a newly constructed empty property
+            OP_NEWPLIST,// .          Push a newly constructed empty property
                         //            list.
             OP_CASE,    // [u16]      Pop value from stack. Use that as the
                         //            test expression. Parameter #1 is the jump
                         //            table identifier.
+            OP_PUT,     // .          Pop value from stack and print it to the
+                        //            console.
         }; // enum opcode
 
         // extra notes on object indices:

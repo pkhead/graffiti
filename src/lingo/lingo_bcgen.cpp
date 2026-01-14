@@ -49,6 +49,16 @@ class gen_handler_scope {
 private:
     uint16_t next_local_idx = 0;
 
+    uintptr_t _alloc_string(const char *v, size_t len) {
+        uintptr_t string_ptr_idx = string_pool.size();
+        string_pool.insert(string_pool.end(), (char*)&len, (char*)(&len + 1));
+        string_pool.insert(string_pool.end(), v, v + (len + 1)); // also copy null terminator
+        size_t next_addr = aligned(alignof(bc::chunk_const_str), string_pool.size());
+        string_pool.insert(string_pool.end(), next_addr - string_pool.size(), '\0');
+
+        return string_ptr_idx;
+    }
+
     uint16_t _get_strbased_const(bc::vtype type, const char *v, size_t len) {
         for (auto it = chunk_consts.begin(); it != chunk_consts.end(); ++it) {
             auto &c = *it;
@@ -57,14 +67,8 @@ private:
             }
         }
 
-        // allocate string
-        uintptr_t string_ptr_idx = string_pool.size();
-        string_pool.insert(string_pool.end(), (char*)&len, (char*)(&len + 1));
-        string_pool.insert(string_pool.end(), v, v + (len + 1)); // also copy null terminator
-        size_t next_addr = aligned(alignof(bc::chunk_const_str), string_pool.size());
-        string_pool.insert(string_pool.end(), next_addr - string_pool.size(), '\0');
-
-        bc::chunk_const new_const = bc::chunk_const((bc::chunk_const_str*)string_ptr_idx);
+        auto alloc_str = (bc::chunk_const_str *)_alloc_string(v, len);
+        bc::chunk_const new_const = bc::chunk_const(alloc_str);
         new_const.type = type;
         chunk_consts.push_back(std::move(new_const));
         return (uint16_t) (chunk_consts.size() - 1);
@@ -76,12 +80,15 @@ public:
     std::vector<bc::instr> instrs;
     std::vector<bc::chunk_const> chunk_consts;
     std::vector<std::pair<uint32_t, uint32_t>> line_info;
+    std::vector<uintptr_t> local_name_refs;
 
     std::unordered_map<std::string, int> local_indices;
 
     gen_handler_scope(gen_script_scope &script_scope)
         : script_scope(script_scope)
         { }
+
+    inline uint16_t local_count() const { return next_local_idx; }
     
     uint16_t get_literal(int32_t v) {
         GENERIC_GET_LITERAL(chunk_consts, bc::TYPE_INT, i32, v);
@@ -113,6 +120,7 @@ public:
 
     inline uint16_t register_local(const std::string &name) {
         local_indices[name] = next_local_idx;
+        local_name_refs.push_back(_alloc_string(name.c_str(), name.size()));
         return next_local_idx++;
     }
 
@@ -344,6 +352,7 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
                 scope.instrs.push_back(INSTR(bc::OP_DUP));
                 generate_expr(elem, ctx);
                 scope.instrs.push_back(INSTR_16_8(bc::OP_OCALL, add_str_idx, 1));
+                scope.instrs.push_back(INSTR(bc::OP_POP));
             }
 
             break;
@@ -661,13 +670,8 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
 
         case ast::STATEMENT_PUT: {
             auto data = static_cast<ast::ast_statement_put*>(stm.get());
-            (void)data;
-            assert(false && "PUT unimplemented");
-            // tmp_stream << "print(";
-            // generate_expr(data->expr, tmp_stream, expr_ctx);
-            // tmp_stream << ")";
-
-            // body_contents << tmp_stream.rdbuf() << "\n";
+            generate_expr(data->expr, expr_ctx);
+            scope.instrs.push_back(INSTR(bc::OP_PUT));
             break;
         }
 
@@ -965,55 +969,24 @@ static void generate_chunk(std::vector<uint8_t> &out,
     if (handler.locals.size() > UINT16_MAX)
         throw gen_exception(handler.pos, "local count exceeded max of 65535");
 
+    chunk_header.nargs = (uint8_t) handler.params.size();
+
     // write and register parameter names
-    // note: the self argument must always be present in order for property
+    // note: the me argument must always be present in order for property
     // variables to work correctly when the first argument (me) is not present
     // in the lingo code.
-    {
-        uint16_t idx = 0;
-        for (auto it = handler.params.begin(); it != handler.params.end(); ++it, ++idx) {
-            scope.register_local(*it);
-            // std::string lua_name = LOCAL_VAR_PREFIX + *it;
-            // scope.lua_locals.insert(lua_name);
-
-            // if (idx > 0) {
-            //     stream << ", ";
-            //     stream << lua_name;
-            // }
-        }
+    for (auto it = handler.params.begin(); it != handler.params.end(); ++it) {
+        scope.register_local(*it);
     }
 
     if (handler.params.size() == 0) {
-        scope.register_local("me");
+        scope.register_local("me (implicit)");
+        ++chunk_header.nargs;
     }
 
     for (auto &local_name : handler.locals) {
         scope.register_local(local_name);
     }
-
-    // stream << ")\n";
-
-    // stream << "local _\n";
-
-    // if (handler.params.size() > 0) {
-    //     stream << "local " << LOCAL_VAR_PREFIX << handler.params.front();
-    //     stream << " = self\n";
-    // }
-
-    // for (auto &local_name : handler.locals) {
-    //     scope.ensure_lua_local(std::string(LOCAL_VAR_PREFIX) + local_name, stream);
-    // }
-
-    // convert lua booleans in parameters to integers, in the case that this
-    // handler was called directly from lua
-    // for (auto &name : handler.params) {
-    //     std::string lua_name = LOCAL_VAR_PREFIX + name;
-    //     stream << "if " << lua_name << " == true then\n";
-    //     stream << "\t" << lua_name << " = 1\n";
-    //     stream << "elseif " << lua_name << " == false then\n";
-    //     stream << "\t" << lua_name << " = 0\n";
-    //     stream << "end\n";
-    // }
 
     for (auto &stm : handler.body) {
         generate_statement(stm, scope);
@@ -1030,34 +1003,40 @@ static void generate_chunk(std::vector<uint8_t> &out,
     if (scope.chunk_consts.size() > UINT16_MAX)
         throw gen_exception(handler.pos, "too many unique constants");
 
-    chunk_header.nargs = (uint8_t) handler.params.size();
     chunk_header.nconsts = (uint16_t) scope.chunk_consts.size();
     chunk_header.ninstr = (uint32_t) scope.instrs.size();
     chunk_header.nlocals = (uint16_t) handler.locals.size();
 
     uintptr_t out_end = sizeof(chunk_header);
 
-    uintptr_t instr_loc = aligned(sizeof(bc::instr), out_end);
+    uintptr_t instr_loc = aligned(alignof(bc::instr), out_end);
     size_t instr_size = sizeof(bc::instr) * scope.instrs.size();
     out_end = instr_loc + instr_size;
 
-    uintptr_t const_loc = aligned(sizeof(bc::chunk_const), out_end);
+    uintptr_t const_loc = aligned(alignof(bc::chunk_const), out_end);
     size_t const_size = sizeof(bc::chunk_const) * scope.chunk_consts.size();
     out_end = const_loc + const_size;
 
-    uintptr_t strpool_loc = aligned(sizeof(bc::chunk_const_str), out_end);
+    uintptr_t strpool_loc = aligned(alignof(bc::chunk_const_str), out_end);
     size_t strpool_size = scope.string_pool.size();
     out_end = strpool_loc + strpool_size;
+
+    // array of bc::chunk_const_str*
+    uintptr_t lname_loc = aligned(alignof(uintptr_t), out_end);
+    size_t lname_size = scope.local_name_refs.size() * sizeof(uintptr_t);
+    out_end = lname_loc + lname_size;
 
     chunk_header.instrs = (bc::instr *)instr_loc;
     chunk_header.consts = (bc::chunk_const *)const_loc;
     chunk_header.string_pool = (bc::chunk_const_str *)strpool_loc;
+    chunk_header.local_names = (const bc::chunk_const_str **)lname_loc;
     
     out.resize(out_end);
     memcpy(out.data(), &chunk_header, sizeof(chunk_header));
     memcpy(out.data() + instr_loc, scope.instrs.data(), instr_size);
     memcpy(out.data() + const_loc, scope.chunk_consts.data(), const_size);
     memcpy(out.data() + strpool_loc, scope.string_pool.data(), strpool_size);
+    memcpy(out.data() + lname_loc, scope.local_name_refs.data(), lname_size);
 
     // if (body_contents.rdbuf()->in_avail()) {
     //     stream << body_contents.rdbuf();
@@ -1230,7 +1209,7 @@ static int eval_hint(char *buf, size_t bufsz, const bc::chunk_header *chunk,
             case bc::TYPE_STRING: {
                 const bc::chunk_const_str *str =
                     bc::base_offset(str_pool, c->str);
-                return snprintf(buf, bufsz, "%s", &str->first);
+                return snprintf(buf, bufsz, "\"%s\"", &str->first);
             }
 
             case bc::TYPE_SYMBOL: {
@@ -1249,7 +1228,10 @@ static int eval_hint(char *buf, size_t bufsz, const bc::chunk_header *chunk,
         const bc::chunk_const_str *str_pool =
             bc::base_offset(chunk, chunk->string_pool);
 
-        const bc::chunk_const_str *str = bc::base_offset(str_pool, chunk->local_names[value]);
+        const bc::chunk_const_str **names =
+            bc::base_offset(chunk, chunk->local_names);
+
+        const bc::chunk_const_str *str = bc::base_offset(str_pool, names[value]);
         return snprintf(buf, bufsz, "%s", &str->first);
     }
 
@@ -1324,6 +1306,7 @@ void bc::instr_disasm(const chunk_header *chunk, instr instruction, char *buf,
         OP_U16(NEWLLIST, HINT_NONE);
         OP(NEWPLIST);
         OP_U16(CASE, HINT_NONE);
+        OP(PUT);
 
         default:
             snprintf(buf, bufsz, "??");
@@ -1367,7 +1350,7 @@ void bc::instr_disasm(const chunk_header *chunk, instr instruction, char *buf,
         return;
 
     hint_ab:
-        if (chunk && hint_a != HINT_NONE && hint_b != HINT_NONE) {
+        if (chunk && (hint_a != HINT_NONE || hint_b != HINT_NONE)) {
             WRITE(snprintf, " ; ");
 
             if (hint_a != HINT_NONE) {
