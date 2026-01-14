@@ -12,11 +12,11 @@ Goals:
   editor and runtime for the purposes of running the official Rain World Level
   Editor and modifications/forks of it.
 - Provide a reasonably fast language runtime for Lingo, Director's scripting
-  language. It should be implemented as an optimizing tracing JIT, with speeds
+  language. It should be implemented as an optimizing JIT, with speeds
   comparable to that of
   [Drizzle](https://github.com/SlimeCubed/Drizzle/tree/community). The goal is
   not exactly to surpass Drizzle in performance, but to at least approach it.
-  Although, the usage of tracing to optimize away type-dynamicness means
+  Although, the usage of analysis to optimize away type-dynamicness means
   it might be likely for it to have an edge if it's implemented well enough.
 - Implement an "extension" allowing the use of Lua as an alternative scripting
   language. Will use LuaJIT as the runtime. The primary motivation of this is to
