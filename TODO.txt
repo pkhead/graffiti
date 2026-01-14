@@ -26,6 +26,16 @@ Questions:
   implemented as a hashtable with keys being cases and values being instruction
   pointers to jump to.
 
+- TODO: Unit tests:
+    1. put number, put string, put symbol, put void
+    2. arithmetic operators with differing number types
+    3. complex arithmetic expressions
+    4. string concatenation, string concat with space
+    5. equivalence checks with differing types
+    6. boolean operator checks
+    7. inequality checks with differing number types
+    8. if, if/else, if/elseif/else checks
+
 three types of scripts:
 - movie
     "attached" to the entire movie. handlers defined there are global

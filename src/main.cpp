@@ -1,7 +1,8 @@
 #include <iostream>
 #include <istream>
 #include <fstream>
-#include "lingo/lingo.hpp"
+#include "lingo/lang/lingo.hpp"
+#include "lingo/vm/vm.hpp"
 
 int lingo_compiler_test(int argc, const char *argv[]) {
     if (argc < 3) {
@@ -76,55 +77,56 @@ int lingo_compiler_test(int argc, const char *argv[]) {
     const lingo::bc::chunk_const_str **lnames = lingo::bc::base_offset(chunk, chunk->local_names);
     const lingo::bc::chunk_const_str *strpool = lingo::bc::base_offset(chunk, chunk->string_pool);
     
-    std::cout << "\tCONSTS:\n";
+    fprintf(stderr, "\tCONSTS:\n");
     for (int i = 0; i < chunk->nconsts; ++i) {
         const lingo::bc::chunk_const *c = consts + i;
-        printf("%i - ", i);
+        fprintf(stderr, "%i - ", i);
         switch (c->type) {
             case lingo::bc::TYPE_INT:
-                printf("int:    %i\n", c->i32);
+                fprintf(stderr, "int:    %i\n", c->i32);
                 break;
 
             case lingo::bc::TYPE_FLOAT:
-                printf("float:  %f\n", c->f64);
+                fprintf(stderr, "float:  %f\n", c->f64);
                 break;
 
             case lingo::bc::TYPE_STRING: {
                 const lingo::bc::chunk_const_str *str =
                     lingo::bc::base_offset(strpool, c->str);
-                printf("string: (%llu) %s\n", str->size, &str->first);
+                fprintf(stderr, "string: (%llu) %s\n", str->size, &str->first);
                 break;
             }
 
             case lingo::bc::TYPE_SYMBOL: {
                 const lingo::bc::chunk_const_str *str =
                     lingo::bc::base_offset(strpool, c->str);
-                printf("symbol: (%llu) %s\n", str->size, &str->first);
+                fprintf(stderr, "symbol: (%llu) %s\n", str->size, &str->first);
                 break;
             }
 
             default:
-                printf("???\n");
+                fprintf(stderr, "???\n");
                 break;
         }
     }
 
-    std::cout << "\tLOCALS:\n";
+    fprintf(stderr, "\tLOCALS:\n");
     for (int i = 0; i < chunk->nargs + chunk->nlocals; ++i) {
         const lingo::bc::chunk_const_str *name_ref = lingo::bc::base_offset(strpool, lnames[i]);
-        printf("%i - %s", i, &name_ref->first);
+        fprintf(stderr, "%i - %s", i, &name_ref->first);
 
         if (i < chunk->nargs)
-            printf(" (param)\n");
+            fprintf(stderr, " (param)\n");
         else
-            printf("\n");
+            fprintf(stderr, "\n");
     }
 
-    std::cout << "\tDISASM:\n";
+    fprintf(stderr, "\tDISASM:\n");
     char buf[64];
     for (uint32_t i = 0; i < chunk->ninstr; ++i) {
         lingo::bc::instr_disasm(chunk, code[i], buf, sizeof(buf));
-        std::cout << buf << "\n";
+        fputs(buf, stderr);
+        fputs("\n", stderr);
     }
 
     ostream->write((char*)chunks[0].data(), chunks[0].size() * sizeof(chunks[0].front()));
@@ -196,9 +198,11 @@ int main(int argc, const char *argv[]) {
             return 1;
         }
 
-        if (chunks.size() == 0) {
-            std::cout << "no chunks generated\n";
-            return 0;
+        std::cout << "chunks generated: " << chunks.size() << "\n";
+
+        if (chunks.size() == 1) {
+            auto runner = std::make_unique<lingo::vm::runner>();
+            runner->run((lingo::bc::chunk_header *)chunks[0].data());
         }
 
         // std::string chunk_name = std::string("@") + FILE_NAME;

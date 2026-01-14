@@ -4,9 +4,10 @@ project('graffiti', 'cpp',
 
 sources = files(
   'src/main.cpp',
-  'src/lingo/lingo_lexer.cpp',
-  'src/lingo/lingo_ast.cpp',
-  'src/lingo/lingo_bcgen.cpp',
+  'src/lingo/lang/lexer.cpp',
+  'src/lingo/lang/ast.cpp',
+  'src/lingo/lang/bcgen.cpp',
+  'src/lingo/vm/vm.cpp',
 )
 
 executable('graffiti',
