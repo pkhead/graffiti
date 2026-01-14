@@ -184,50 +184,6 @@ public:
     }
 }; // class bc_label
 
-static void write_escaped_str(const std::string &str, std::ostream &ostream) {
-    ostream.put('"');
-
-    for (char src_ch : str) {
-        switch (src_ch) {
-            case '"':
-                ostream << "\\\"";
-                break;
-
-            case '\n':
-                ostream << "\\n";
-                break;
-
-            case '\t':
-                ostream << "\\t";
-                break;
-
-            case '\r':
-                ostream << "\\r";
-                break;
-            
-            case '\b':
-                ostream << "\\b";
-                break;
-
-            case '\\':
-                ostream << "\\\\";
-                break;
-            
-            default:
-                if (src_ch < 32 || src_ch >= 126) {
-                    ostream << "\\";
-                    ostream << (unsigned int)src_ch;
-                } else {
-                    ostream.put(src_ch);
-                }
-                
-                break;
-        }
-    }
-
-    ostream.put('"');
-}
-
 static inline bool is_literal_str(const ast::ast_expr *expr, const char **str) {
     if (expr->type != ast::EXPR_LITERAL) return false;
     const auto *data = static_cast<const ast::ast_expr_literal*>(expr);
@@ -235,40 +191,6 @@ static inline bool is_literal_str(const ast::ast_expr *expr, const char **str) {
 
     if (str) *str = data->str.c_str();
     return true;
-}
-
-static bool get_handler_ref(const std::string &name, std::ostream &ostream,
-                            expr_gen_ctx &ctx) {
-    static const std::unordered_map<std::string, std::string> fmap = {
-        { "abs", "math.abs" },
-        { "atan", "math.atan" },
-        { "cos", "math.cos" },
-        { "exp", "math.exp" },
-        { "log", "math.log" },
-        { "sin", "math.sin" },
-        { "sqrt", "math.sqrt" },
-
-        { "string", "tostring" },
-
-        { "rect", "lingo.rect" },
-        { "point", "lingo.point" },
-        { "member", "member" },
-        { "sprite", "sprite" },
-        { "float", "lruntime.to_float" },
-    };
-    
-    const auto &it = fmap.find(name);
-    if (it != fmap.end()) {
-        ostream << it->second;
-        return true;
-    }
-    
-    if (ctx.scope.script_scope.has_handler(name)) {
-        ostream << "script." << name;
-        return true;
-    }
-
-    return false;
 }
 
 static void generate_store(std::unique_ptr<ast::ast_expr> &expr,
