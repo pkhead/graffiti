@@ -9,6 +9,11 @@ using namespace lingo;
 
 static constexpr char ESC = '\x1b';
 
+#define INSTR(op) (bc::instr)(op)
+#define INSTR_16(op, a) (bc::instr)((uint8_t)(op) | ((uint16_t)(a) << 8))
+#define INSTR_8(op, a) (bc::instr)((uint8_t)(op) | ((uint8_t)(a) << 8))
+#define INSTR_16_8(op, a, b) (bc::instr)((uint8_t)(op) | ((uint16_t)(a) << 8) | ((uint8_t)(b) << 24))
+
 class gen_exception : public std::runtime_error {
 public:
     pos_info pos;
@@ -139,6 +144,46 @@ struct expr_gen_ctx {
     gen_handler_scope &scope;
 };
 
+class bc_label {
+private:
+    struct branch_location {
+        uint32_t idx;
+        bc::opcode op;
+    };
+
+    std::vector<bc::instr> &instrs;
+    std::vector<branch_location> branch_locs;
+public:
+    bc_label(std::vector<bc::instr> &instrs) : instrs(instrs) { }
+
+    ~bc_label() {
+        assert(branch_locs.empty());
+    }
+
+    template <bc::opcode Op>
+    void insert() {
+        static_assert(Op == bc::OP_BRF || Op == bc::OP_BRT || Op == bc::OP_JMP);
+        branch_locs.push_back({
+            (uint32_t)instrs.size(),
+            Op
+        });
+        instrs.push_back(INSTR_16(Op, 0));
+    }
+
+    void mark(pos_info pos, int offset = 0) {
+        int64_t cur = (int64_t) instrs.size() + offset;
+        for (auto &loc : branch_locs) {
+            int64_t jmp_offset = cur - (int64_t)loc.idx;
+            if (jmp_offset < INT16_MIN || jmp_offset > INT16_MAX)
+                throw gen_exception(pos, "jump offset is too far");
+
+            instrs[loc.idx] = INSTR_16(loc.op, (int16_t)jmp_offset);
+        }
+
+        branch_locs.clear();
+    }
+}; // class bc_label
+
 static void write_escaped_str(const std::string &str, std::ostream &ostream) {
     ostream.put('"');
 
@@ -226,13 +271,85 @@ static bool get_handler_ref(const std::string &name, std::ostream &ostream,
     return false;
 }
 
-#define INSTR(op) (bc::instr)(op)
-#define INSTR_16(op, a) (bc::instr)((uint8_t)(op) | ((uint16_t)(a) << 8))
-#define INSTR_8(op, a) (bc::instr)((uint8_t)(op) | ((uint8_t)(a) << 8))
-#define INSTR_16_8(op, a, b) (bc::instr)((uint8_t)(op) | ((uint16_t)(a) << 8) | ((uint8_t)(b) << 24))
+static void generate_store(std::unique_ptr<ast::ast_expr> &expr,
+                           expr_gen_ctx &ctx) {
+    gen_handler_scope &scope = ctx.scope;
+
+    switch (expr->type) {
+        case ast::EXPR_IDENTIFIER: {
+            auto data = static_cast<ast::ast_expr_identifier*>(expr.get());
+
+            switch (data->scope) {
+                case ast::SCOPE_LOCAL:
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_STOREL,
+                        scope.get_local_index(data->identifier)));
+                    break;
+
+                case ast::SCOPE_GLOBAL:
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_STOREG,
+                        scope.get_symbol(data->identifier)));
+                    break;
+
+                case ast::SCOPE_PROPERTY:
+                    scope.instrs.push_back(INSTR(bc::OP_LOADL0));
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_LOADC,
+                        scope.get_symbol(data->identifier)));
+                    scope.instrs.push_back(INSTR(bc::OP_OIDXS));
+                    break;
+            }
+
+            break;
+        }
+
+        // case ast::EXPR_THE: {
+        //     auto data = static_cast<ast::ast_expr_the*>(expr.get());
+        //     scope.instrs.push_back(INSTR_8(bc::OP_THE, data->identifier));
+        //     break;
+        // }
+
+        case ast::EXPR_DOT: {
+            assert(false && "lvalue EXPR_DOT not implemented");
+            // auto data = static_cast<ast::ast_expr_dot*>(expr.get());
+
+            // ostream << "(";
+            // generate_expr(data->expr, ostream, ctx);
+            // ostream << ")." << data->index;
+            break;
+        }
+
+        case ast::EXPR_INDEX: {
+            assert(false && "lvalue EXPR_INDEX not implemented");
+            // auto data = static_cast<ast::ast_expr_index*>(expr.get());
+
+            // if (data->index_to) {
+            //     ostream << "(lruntime.range(";
+            //     generate_expr(data->expr, ostream, ctx);
+            //     ostream << ", ";
+            //     generate_expr(data->index_from, ostream, ctx);
+            //     ostream << ", ";
+            //     generate_expr(data->index_to, ostream, ctx);
+            //     ostream << "))";
+            // } else {
+            //     ostream << "(";
+            //     generate_expr(data->expr, ostream, ctx);
+            //     ostream << ")[";
+            //     generate_expr(data->index_from, ostream, ctx);
+            //     ostream << "]";
+            // }
+
+            break;
+        }
+
+        default:
+            throw gen_exception(expr->pos, "unimplemented expr type");
+    }
+}
 
 static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
-                          expr_gen_ctx &ctx, bool assignment = false) {
+                          expr_gen_ctx &ctx) {
     gen_handler_scope &scope = ctx.scope;
 
     switch (expr->type) {
@@ -290,46 +407,23 @@ static void generate_expr(std::unique_ptr<ast::ast_expr> &expr,
 
             switch (data->scope) {
                 case ast::SCOPE_LOCAL:
-                    if (assignment) {
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_STOREL,
-                            scope.get_local_index(data->identifier)));
-                    } else {
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_LOADL,
-                            scope.get_local_index(data->identifier)));
-                    }
-
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_LOADL,
+                        scope.get_local_index(data->identifier)));
                     break;
 
                 case ast::SCOPE_GLOBAL:
-                    if (assignment) {
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_STOREG,
-                            scope.get_symbol(data->identifier)));
-                    } else {
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_LOADG,
-                            scope.get_symbol(data->identifier)));
-                    }
-
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_LOADG,
+                        scope.get_symbol(data->identifier)));
                     break;
 
                 case ast::SCOPE_PROPERTY:
-                    if (assignment) {
-                        scope.instrs.push_back(INSTR(bc::OP_LOADL0));
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_LOADC,
-                            scope.get_symbol(data->identifier)));
-                        scope.instrs.push_back(INSTR(bc::OP_OIDXS));
-                    } else {
-                        scope.instrs.push_back(INSTR(bc::OP_LOADL0));
-                        scope.instrs.push_back(INSTR_16(
-                            bc::OP_LOADC,
-                            scope.get_symbol(data->identifier)));
-                        scope.instrs.push_back(INSTR(bc::OP_OIDXG));
-                    }
-
+                    scope.instrs.push_back(INSTR(bc::OP_LOADL0));
+                    scope.instrs.push_back(INSTR_16(
+                        bc::OP_LOADC,
+                        scope.get_symbol(data->identifier)));
+                    scope.instrs.push_back(INSTR(bc::OP_OIDXG));
                     break;
             }
 
@@ -614,44 +708,14 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
             generate_expr(data->expr, expr_ctx);
             scope.instrs.push_back(INSTR(bc::OP_POP));
 
-            // if (data->expr->type == ast::EXPR_CALL) {
-            //     generate_expr(data->expr, tmp_stream, expr_ctx);
-            //     tmp_stream << "\n";    
-            // } else {
-            //     tmp_stream << "_ = ";
-            //     generate_expr(data->expr, tmp_stream, expr_ctx);
-            //     tmp_stream << " _ = nil\n";
-            // }
-
-            // body_contents << tmp_stream.rdbuf();
             break;
         }
 
         case ast::STATEMENT_ASSIGN: {
             auto assign = static_cast<ast::ast_statement_assign*>(stm.get());
 
-            // if this is a variable assignment, declare local variable if
-            // it was not already declared
-            // if (assign->lvalue->type == ast::EXPR_IDENTIFIER) {
-            //     auto lvalue = static_cast<ast::ast_expr_identifier*>(assign->lvalue.get());
-            //     std::string real_var = LOCAL_VAR_PREFIX + lvalue->identifier;
-
-            //     var_scope::scope_class classif;
-            //     if (!scope.has_var(lvalue->identifier, classif)) {
-            //         // register lingo and lua name of local
-            //         scope.locals.insert(lvalue->identifier);
-            //         scope.lua_locals.insert(real_var);
-
-            //         // insert local declaration at the top of the lua
-            //         // function
-            //         func_stream << "local ";
-            //         func_stream << real_var;
-            //         func_stream << "\n";
-            //     }
-            // }
-
             generate_expr(assign->rvalue, expr_ctx);
-            generate_expr(assign->lvalue, expr_ctx, true);
+            generate_store(assign->lvalue, expr_ctx);
 
             break;
         }
@@ -761,43 +825,40 @@ static void generate_statement(const std::unique_ptr<ast::ast_statement> &stm,
         }
 
         case ast::STATEMENT_IF: {
-            assert(false && "IF unimplemented");
-            // auto data = static_cast<ast::ast_statement_if*>(stm.get());
+            auto data = static_cast<ast::ast_statement_if*>(stm.get());
 
-            // size_t i = 0;
-            // for (auto it = data->branches.begin(); it != data->branches.end(); ++it, ++i) {
-            //     auto &branch = *it;
+            bc_label master_exit(scope.instrs);
+            bc_label next_branch(scope.instrs);
 
-            //     if (i > 0) {
-            //         tmp_stream << "else\n";
-            //     }
+            size_t i = 0;
+            for (auto it = data->branches.begin(); it != data->branches.end(); ++it, ++i) {
+                auto &branch = *it;
 
-            //     {
-            //         // insert runtime check if value is a integer or void type
-            //         auto tmp = expr_ctx.scope.create_temp_var(func_stream);
-            //         auto check = cond_check(branch->condition, tmp);
-            //         // create the Real branch
-            //         tmp_stream << "if " << check << " then\n";
-            //     }
+                if (i > 0) {
+                    next_branch.mark(data->pos);
+                }
 
-            //     for (const auto &child_stm : branch->body) {
-            //         generate_statement(child_stm, func_stream, tmp_stream, scope);
-            //     }
-            // }
+                generate_expr(branch->condition, expr_ctx);
+                next_branch.insert<bc::OP_BRF>();
 
-            // if (data->has_else) {
-            //     tmp_stream << "else\n";
-            //     for (const auto &child_stm : data->else_branch) {
-            //         generate_statement(child_stm, func_stream, tmp_stream, scope);
-            //     }
-            // }
+                for (const auto &child_stm : branch->body) {
+                    generate_statement(child_stm, scope);
+                }
+                
+                master_exit.insert<bc::OP_JMP>();
+            }
 
-            // for (i = 0; i < data->branches.size(); ++i) {
-            //     tmp_stream << "end ";
-            // }
+            if (data->has_else) {
+                next_branch.mark(data->pos);
 
-            // tmp_stream << "\n";
-            // body_contents << tmp_stream.rdbuf();
+                for (const auto &child_stm : data->else_branch) {
+                    generate_statement(child_stm, scope);
+                }
+            }
+
+            master_exit.mark(data->pos);
+            next_branch.mark(data->pos);
+            
             break;
         }
 
