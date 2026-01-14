@@ -1200,3 +1200,190 @@ bool lingo::compile_bytecode(std::istream &istream,
 
     return true;
 }
+
+enum usage_hint {
+    HINT_NONE,
+    HINT_LOCAL,
+    HINT_CONST,
+    HINT_THE
+};
+
+static int eval_hint(char *buf, size_t bufsz, const bc::chunk_header *chunk,
+                     int value, usage_hint hint) {
+    if (hint == HINT_NONE) return 0;
+    if (hint == HINT_CONST) {
+        assert(chunk->consts);
+        assert(chunk->string_pool);
+
+        const bc::chunk_const *c =
+            &bc::base_offset(chunk, chunk->consts)[value];
+        const bc::chunk_const_str *str_pool =
+            bc::base_offset(chunk, chunk->string_pool);
+        
+        switch (c->type) {
+            case bc::TYPE_INT:
+                return snprintf(buf, bufsz, "%i", c->i32);
+
+            case bc::TYPE_FLOAT:
+                return snprintf(buf, bufsz, "%f", c->f64);
+
+            case bc::TYPE_STRING: {
+                const bc::chunk_const_str *str =
+                    bc::base_offset(str_pool, c->str);
+                return snprintf(buf, bufsz, "%s", &str->first);
+            }
+
+            case bc::TYPE_SYMBOL: {
+                const bc::chunk_const_str *str =
+                    bc::base_offset(str_pool, c->str);
+                return snprintf(buf, bufsz, "#%s", &str->first);
+            }
+
+            default:
+                return snprintf(buf, bufsz, "???");
+        }
+    }
+
+    if (hint == HINT_LOCAL && chunk->local_names) {
+        assert(chunk->string_pool);
+        const bc::chunk_const_str *str_pool =
+            bc::base_offset(chunk, chunk->string_pool);
+
+        const bc::chunk_const_str *str = bc::base_offset(str_pool, chunk->local_names[value]);
+        return snprintf(buf, bufsz, "%s", &str->first);
+    }
+
+    return 0;
+}
+
+// fucking evil goto but i don't care
+void bc::instr_disasm(const chunk_header *chunk, instr instruction, char *buf,
+                      size_t bufsz) {
+    #define OP(o) case OP_##o: opcode = #o; goto decode_none
+    #define OP_U16(o, h) case OP_##o: opcode = #o; hint_a = h; goto decode_u16
+    #define OP_U16_U8(o, a, b) case OP_##o: opcode = #o; hint_a = a; hint_b = b; goto decode_u16_u8
+    #define OP_I16(o, a) case OP_##o: opcode = #o; hint_a = a; goto decode_i16
+    #define OP_I16_U8(o, a, b) case OP_##o: opcode = #o; hint_a = a; hint_b = b; goto decode_i16_u8
+    #define OP_U8(o, a) case OP_##o: opcode = #o; hint_a = a; goto decode_u8
+    #define WRITE(f, ...) do {\
+        offset = (size_t) (f)(buf, bufsz, __VA_ARGS__); \
+        if (offset >= bufsz) return; \
+        buf += offset; bufsz -= offset; \
+    } while (false)
+
+    const char *opcode;
+    usage_hint hint_a = HINT_NONE;
+    usage_hint hint_b = HINT_NONE;
+
+    uint16_t u16;
+    int16_t i16;
+    uint8_t u8[2];
+    size_t offset = 0;
+
+    int operand_a, operand_b;
+
+    switch (instruction & 0xFF) {
+        OP(RET);
+        OP(POP);
+        OP(DUP);
+        OP(LOADVOID);
+        OP(LOADI0);
+        OP(LOADI1);
+        OP_U16(LOADC, HINT_CONST);
+        OP_U16(LOADL, HINT_LOCAL);
+        OP(LOADL0);
+        OP_U16(LOADG, HINT_CONST);
+        OP_U16(STOREL, HINT_LOCAL);
+        OP_U16(STOREG, HINT_CONST);
+        OP(UNM);
+        OP(ADD);
+        OP(SUB);
+        OP(MUL);
+        OP(DIV);
+        OP(MOD);
+        OP(EQ);
+        OP(LT);
+        OP(GT);
+        OP(LTE);
+        OP(GTE);
+        OP(AND);
+        OP(OR);
+        OP(NOT);
+        OP(CONCAT);
+        OP(CONCATSP);
+        OP_I16(JMP, HINT_NONE);
+        OP_I16(BRT, HINT_NONE);
+        OP_I16(BRF, HINT_NONE);
+        OP_U16_U8(CALL, HINT_CONST, HINT_NONE);
+        OP_U16_U8(OCALL, HINT_CONST, HINT_NONE);
+        OP(OIDXG);
+        OP(OIDXS);
+        OP(OIDXK);
+        OP(OIDXKR);
+        OP_U8(THE, HINT_THE);
+        OP_U16(NEWLLIST, HINT_NONE);
+        OP(NEWPLIST);
+        OP_U16(CASE, HINT_NONE);
+
+        default:
+            snprintf(buf, bufsz, "??");
+            return;
+    }
+
+    decode_none:
+        WRITE(snprintf, "%s", opcode);
+        return;
+
+    decode_u8:
+        bc::instr_decode(instruction, &u8[0]);
+        operand_a = (int)u8[0];
+        WRITE(snprintf, "%-12s %i", opcode, operand_a);
+        goto hint_a;
+
+    decode_u16:
+        bc::instr_decode(instruction, &u16);
+        operand_a = (int)u16;
+        WRITE(snprintf, "%-12s %i", opcode, operand_a);
+        goto hint_a;
+
+    decode_i16:
+        bc::instr_decode(instruction, &i16);
+        operand_a = (int)i16;
+        WRITE(snprintf, "%-12s %i", opcode, operand_a);
+        goto hint_a;
+        
+    decode_u16_u8:
+        bc::instr_decode(instruction, &u16, &u8[0]);
+        operand_a = (int)u16;
+        operand_b = (int)u8[0];
+        WRITE(snprintf, "%-12s %i %i", opcode, operand_a, operand_b);
+        goto hint_ab;
+
+    hint_a:
+        if (chunk && hint_a != HINT_NONE) {
+            WRITE(snprintf, " ; ");
+            WRITE(eval_hint, chunk, operand_a, hint_a);
+        }
+        return;
+
+    hint_ab:
+        if (chunk && hint_a != HINT_NONE && hint_b != HINT_NONE) {
+            WRITE(snprintf, " ; ");
+
+            if (hint_a != HINT_NONE) {
+                WRITE(eval_hint, chunk, operand_a, hint_a);
+            }
+
+            WRITE(snprintf, ", ");
+
+            if (hint_b != HINT_NONE) {
+                WRITE(eval_hint, chunk, operand_b, hint_b);
+            }
+        }
+        return;
+
+    // decode_i16_u8:
+    //     bc::instr_decode(instruction, &i16, &u8[0]);
+    //     offset += snprintf(buf, bufsz, "%-12s %i %i", opcode, (int)i16, (int)u8[0]);
+    //     return;
+}

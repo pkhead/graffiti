@@ -533,7 +533,7 @@ namespace lingo {
                         //            into the given local variable index.
             OP_STOREG,  // [u16]      Store the value on the top of the stack
                         //            into a global of the given name.
-            OP_UNM,     // [u8]       Unary negation.
+            OP_UNM,     // .          Unary negation.
             OP_ADD,     // .          Pop two values, and push their sum.
             OP_SUB,     // .          Pop two values, and push their difference.
             OP_MUL,     // .          Pop two values, and push their product.
@@ -554,8 +554,10 @@ namespace lingo {
             OP_CONCATSP,// .          Pop 2, push string concatenation of the
                         //            two values, separated by a space.
             OP_JMP,     // [i16]      Relative unconditional jump.
-            OP_BT,      // [i16]      Jump to given relative instruction index
+            OP_BRT,     // [i16]      Jump to given relative instruction index
                         //            if popped value equals 1.
+            OP_BRF,     // [i16]      Jump to given relative instruction index
+                        //            if popped value does not equal 1.
             OP_CALL,    // [u16] [u8] Call global message handler by the given
                         //            string literal (#1), with n (#2)
                         //            arguments. That number of arguments will
@@ -717,13 +719,14 @@ namespace lingo {
             uint32_t ninstr;
             uint32_t line_info_count;
 
-            // these are offsets from the start of the chunk header
+            // these are offsets from the start of the chunk header. use the
+            // base_offset function to get the real pointer.
             const bc::instr *instrs;
             const char *name;
             const chunk_const *consts;
             const chunk_const_str *string_pool;
             const char *file_name;
-            const char *arg_names;
+            const chunk_const_str **local_names;
             const chunk_line_info *line_info;
             
             // variant *consts;
@@ -736,12 +739,36 @@ namespace lingo {
         };
 
         template <typename Ta, typename Tb>
-        constexpr Tb* base_offset(const Ta *base, Tb *offset) {
+        constexpr inline Tb* base_offset(const Ta *base, Tb *offset) {
             uintptr_t ptr = ((uintptr_t)base + (uintptr_t)offset);
             assert(ptr % alignof(Tb) == 0);
             return (Tb *)ptr;
         }
 
+        constexpr inline void instr_decode(instr inst, uint8_t *a) {
+            *a = (uint8_t)((inst >> 8) & 0xFF);
+        }
+
+        constexpr inline void instr_decode(instr inst, uint16_t *a) {
+            *a = (uint16_t)((inst >> 8) & 0xFFFF);
+        }
+
+        constexpr inline void instr_decode(instr inst, int16_t *a) {
+            *a = (int16_t)((inst >> 8) & 0xFFFF);
+        }
+
+        constexpr inline void instr_decode(instr inst, uint16_t *a, uint8_t *b) {
+            *a = (uint16_t)((inst >> 8) & 0xFFFF);
+            *b = (uint8_t)((inst >> 24) & 0xFF);
+        }
+
+        constexpr inline void instr_decode(instr inst, int16_t *a, uint8_t *b) {
+            *a = (int16_t)((inst >> 8) & 0xFFFF);
+            *b = (uint8_t)((inst >> 24) & 0xFF);
+        }
+
+        void instr_disasm(const chunk_header *chunk, instr instruction,
+                          char *buf, size_t bufsz);
         bool generate_bytecode(const ast::ast_root &root,
                                std::vector<std::vector<uint8_t>> &chunk_list,
                                parse_error *error);

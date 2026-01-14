@@ -71,10 +71,11 @@ int lingo_compiler_test(int argc, const char *argv[]) {
     }
 
     const lingo::bc::chunk_header *chunk = (lingo::bc::chunk_header *)chunks[0].data();
+    const lingo::bc::instr *code = lingo::bc::base_offset(chunk, chunk->instrs);
     const lingo::bc::chunk_const *consts = lingo::bc::base_offset(chunk, chunk->consts);
     const lingo::bc::chunk_const_str *strpool = lingo::bc::base_offset(chunk, chunk->string_pool);
     
-    std::cout << "CONSTS:\n";
+    std::cout << "\tCONSTS:\n";
     for (int i = 0; i < chunk->nconsts; ++i) {
         const lingo::bc::chunk_const *c = consts + i;
         printf("%i - ", i);
@@ -105,6 +106,13 @@ int lingo_compiler_test(int argc, const char *argv[]) {
                 printf("???\n");
                 break;
         }
+    }
+
+    std::cout << "\tDISASM:\n";
+    char buf[64];
+    for (uint32_t i = 0; i < chunk->ninstr; ++i) {
+        lingo::bc::instr_disasm(chunk, code[i], buf, sizeof(buf));
+        std::cout << buf << "\n";
     }
 
     ostream->write((char*)chunks[0].data(), chunks[0].size() * sizeof(chunks[0].front()));
