@@ -1,4 +1,4 @@
-project('evillingo', 'cpp',
+project('graffiti', 'cpp',
         version : '0.1',
         default_options : ['warning_level=3', 'cpp_std=c++17'])
 
@@ -9,5 +9,5 @@ sources = files(
   'src/lingo/lingo_bcgen.cpp',
 )
 
-executable('evillingo',
+executable('graffiti',
            sources : sources)

@@ -1,17 +1,30 @@
 - boolean operations don't do short-circuiting
 - lingo does not have booleans. a truthy value is a non-zero integer
   (using a float in a conditional, or any other data type, results in an error)
+- function arguments should be pushed last. So that the stack frame can overlap
+  with no copying needed.
 
-- TODO: generator tmpvar support for do...end blocks ???
-        or maybe i can get away with declaring new local var on every do block i mean yea
-- TODO: psuedo-indicies (done in ast generation):
-    A.float -> lruntime.psuedo.float(A)
-    A.lines[B] -> lruntime.psuedo.str_line(A, B)
-    A.lines[B..C] -> lruntime.psuedo.str_line(A, B, C)
+Questions:
+- https://asmjit.com/
+- Will be a tracing optimizing JIT  (oh god)
+- How to implement an efficient GC?
+- Should I have an interpreter or only a JIT?
+- Do I need to allow a function to be optimized while it's running? (most
+  likely I do.) How would that work? how do i make functions of one optimization
+  stage continue at the same point as the code from the previous optimization
+  stage?
+    (Probably find literature, or worst case scenario study luaJIT code.)
+
+- TODO: psuedo-indices (done in ast generation):
+    A.lines[B]
+    A.lines[B..C]
 - TODO: empty global declaration can exist
 - TODO: duplicate handler-level global declarations can exist
 - TODO: next (the marker + 1) keyword
 - TODO: allow drizzle type information (obv ignore it)
+- TODO: implement case structure with jump tables, which will (probably) be
+  implemented as a hashtable with keys being cases and values being instruction
+  pointers to jump to.
 
 three types of scripts:
 - movie
