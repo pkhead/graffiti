@@ -28,3 +28,43 @@ types:
 5 - the platform
 
 each instruction is 4 bytes long. The first byte will always be the opcode.
+
+== JIT compilation ==
+==== Tracing JITs ==
+https://www.freelists.org/post/luajit/How-does-LuaJITs-trace-compiler-work,1
+https://kipp.ly/jits-impls/
+
+tracing jits work by tracing the sequence of instructions the interpreter
+executes in a hot loop. enables greater potential optimization than
+what can be achieved by static or method-based compilation (like aggressive
+inlining).
+
+1. for each loop, record the number of times the loop was executed (or .. maybe
+   the number of times an instruction inside the loop was executed as well? in
+   case the loop doesn't iterate much but performs a lot of instructions; i want
+   to compile eagerly to optimize away dynamic typing.)
+2. once execution count reaches a certain threshold, start tracing the execution
+   path from start to end. once the loop ends, generate/optimize native code
+   which will be ran on subsequent iterations of the loop.
+3. when a guard fails, the trace is aborted and it will continue execution at
+   that point using the interpreter. if the same guard fails too many times,
+   then it will create a new trace that starts from the point of that guard.
+4. perform more intensive optimizations on a trace the more it is executed
+
+extra notes:
+- branching/uncertain paths are handled by guards, which aborts the trace if
+  tripped. otherwise it will assume the path that the trace took.
+- inner loops are separate traces. it will run the outer loop trace until the
+  inner loop starts, run/process that inner loop as an independent trace, and
+  then start the outer loop back up again after that ends. at least, that's what
+  I think mike pall is trying to say. if the inner loop has a low iteration
+  count, it will be inlined instead. (q: constant or traced?)
+- allegedly, luaJIT can optimize away table allocation and access. i assume this
+  can only happen when a table exists solely within the scope of a trace. That
+  seems really awesome. I can make point, quad, and color stack-allocated after
+  all!!!
+
+==== Method-based JITs ====
+Uhh pretty self-explanatory honestly. i think.
+But i think making really optimized JIT code this way is harder than doing the
+same for tracing JITs?
