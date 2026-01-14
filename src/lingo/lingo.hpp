@@ -5,6 +5,7 @@
 #include <vector>
 #include <utility>
 #include <memory>
+#include <cassert>
 
 namespace lingo {
     struct pos_info {
@@ -230,8 +231,10 @@ namespace lingo {
         enum ast_the_id : uint8_t {
             EXPR_THE_MOVIE_PATH,
             EXPR_THE_FRAME,
-            EXPR_THE_RANDOM_SEED,
             EXPR_THE_DIR_SEPARATOR,
+            EXPR_THE_MILLISECONDS,
+            EXPR_THE_RANDOM_SEED,
+            EXPR_THE_PLATFORM
         };
 
         enum ast_literal_type : uint8_t {
@@ -508,17 +511,246 @@ namespace lingo {
                        parse_error *error);
     } // namespace ast
 
-    struct extra_gen_params {
-        bool no_line_numbers = false;
-    };
+    namespace bc {
+        enum opcode : uint8_t {
+            OP_RET,     // .          Return from the function. Value will be
+                        //            popped from the stack to serve as the
+                        //            return value.
+            OP_POP,     // .          Pop the value on the top of the stack.
+            OP_DUP,     // .          Duplicate the value at the top of the
+                        //            stack.
+            OP_LOADVOID,// .          Push a void value onto the stack.
+            OP_LOADI0,  // .          Load integer 0 (FALSE) onto the stack.
+            OP_LOADI1,  // .          Load integer 1 (TRUE) onto the stack.
+            OP_LOADC,   // [u16]      Push a literal from the constant list onto
+                        //            the stack.
+            OP_LOADL,   // [u16]      Push the value of a local onto the stack.
+            OP_LOADL0,  // .          Push the value of local #0 (me) onto the
+                        //            stack.
+            OP_LOADG,   // [u16]      Push the value of the global name onto the
+                        //            stack.
+            OP_STOREL,  // [u16]      Store the value on the top of the stack
+                        //            into the given local variable index.
+            OP_STOREG,  // [u16]      Store the value on the top of the stack
+                        //            into a global of the given name.
+            OP_UNM,     // [u8]       Unary negation.
+            OP_ADD,     // .          Pop two values, and push their sum.
+            OP_SUB,     // .          Pop two values, and push their difference.
+            OP_MUL,     // .          Pop two values, and push their product.
+            OP_DIV,     // .          Pop two values, and push their quotient.
+                        //            Will perform integer division if either A
+                        //            or B is an integer.
+            OP_MOD,     // .          Pop two values, push result of A mod B.
+            OP_EQ,      // .          Pop 2, push 1 if A == B, 0 if not.
+            OP_LT,      // .          Pop 2, push 1 if A < B, 0 if not.
+            OP_GT,      // .          Pop 2, push 1 if A > B, 0 if not.
+            OP_LTE,     // .          Pop 2, push 1 if A <= B, 0 if not.
+            OP_GTE,     // .          Pop 2, push 1 if A >= B, 0 if not.
+            OP_AND,     // .          Pop 2, compute the logical AND of A and B.
+            OP_OR,      // .          Pop 2, compute the logical OR of A and B.
+            OP_NOT,     // .          Pop 1, compute the logical NOT Of A
+            OP_CONCAT,  // .          Pop 2, push string concatenation of the
+                        //            two values.
+            OP_CONCATSP,// .          Pop 2, push string concatenation of the
+                        //            two values, separated by a space.
+            OP_JMP,     // [i16]      Relative unconditional jump.
+            OP_BT,      // [i16]      Jump to given relative instruction index
+                        //            if popped value equals 1.
+            OP_CALL,    // [u16] [u8] Call global message handler by the given
+                        //            string literal (#1), with n (#2)
+                        //            arguments. That number of arguments will
+                        //            be popped to the stack, bottom-to-top.
+                        //            Return value will be pushed to the stack.
+            OP_OCALL,   // [u16] [u8] Invoke message, of name #1 (string
+                        //            literal), with (#2) integer literal
+                        //            argument count, on an object. The value
+                        //            first pushed to the stack is the pertinent
+                        //            object. The rest of the stack values will
+                        //            be arguments sent to the function call.
+                        //            Return value will be pushed to the stack.
+            OP_OIDXG,   // .          pop: index then object. push result of o[i].
+            OP_OIDXS,   // .          pop: index, object, then value. perform
+                        //            o[i] = v.
+            OP_OIDXK,   // .          pop: index, key (string), then object.
+                        //            push result of o.k[i].
+            OP_OIDXKR,  // .          pop: index B (integer), index A (integer),
+                        //            key (string), object. push result of
+                        //            o.k[a..b].
+            OP_THE,     // [u8]       Push the "the" value.
+            OP_NEWLLIST,// [u16]      Push a newly constructed empty linear
+                        //            list with a given number of pre-allocated.
+                        //            elements.
+            OP_NEWPLIST,//            Push a newly constructed empty property
+                        //            list.
+            OP_CASE,    // [u16]      Pop value from stack. Use that as the
+                        //            test expression. Parameter #1 is the jump
+                        //            table identifier.
+        }; // enum opcode
 
-    namespace codegen {
-        bool generate_luajit_text(const ast::ast_root &root,
-                                  std::ostream &stream, parse_error *error,
-                                  extra_gen_params *params);
-    }
+        // extra notes on object indices:
+        // - O.k will be emitted as
+        //      LOADL local O
+        //      LOADC #k
+        //      OIDXG
+        // - O[k] will be emitted as
+        //      LOADL local O
+        //      LOADL local k
+        //      OIDXG
+        // - O.foo.bar[3] will be emitted as
+        //      LOADL local O
+        //      LOADC #foo
+        //      OIDXG
+        //      PUSHC #bar
+        //      PUSHC 3
+        //      OIDXK
 
-    bool compile_luajit_text(std::istream &istream, std::ostream &ostream,
-                             parse_error *error,
-                             extra_gen_params *params = nullptr);
+        typedef uint32_t instr;
+
+        enum vtype : uint8_t {
+            TYPE_VOID,
+            TYPE_INT, // int32_t
+            TYPE_FLOAT, // double
+            TYPE_STRING, // ref
+            TYPE_SYMBOL, // ref
+            TYPE_LLIST, // linear list, ref
+            TYPE_PLIST, // property list, ref
+            TYPE_POINT, // ref
+            TYPE_QUAD, // ref
+        }; // enum type
+
+        // this is a header struct - subsequent characters directly follow
+        // afterwards in memory. will be nul-terminated, meaning that there will
+        // always be at least one character of data. size field does not account
+        // for this nul byte.
+        struct chunk_const_str {
+            size_t size;
+            char first;
+
+            inline bool equal(const chunk_const_str *other) const {
+                if (size != other->size) return false;
+                return !memcmp(&first, &other->first, size + 1);
+            }
+
+            inline bool equal(const char *str, size_t len) const {
+                if (size != len) return false;
+                return !memcmp(&first, str, len + 1);
+            }
+
+            inline bool equal(const char *str) const {
+                return equal(str, strlen(str));
+            }
+        };
+
+        struct chunk_const {
+        private:
+            template <typename T>
+            static constexpr vtype vtype_of() {
+                if constexpr (std::is_same<const T&, const int32_t&>())
+                    return TYPE_INT;
+                else if constexpr (std::is_same<const T&, const double&>())
+                    return TYPE_FLOAT;
+                else if constexpr (std::is_same<const T&, const std::string&>())
+                    return TYPE_STRING;
+                else
+                    static_assert(false, "unimplemented/invalid type_enum_of");
+            }
+
+        public:
+            vtype type;
+            union {
+                int32_t i32;
+                double f64;
+                chunk_const_str *str; // shared by variant
+            };
+
+            chunk_const() : type(TYPE_VOID), i32(0) { }
+            chunk_const(int32_t v) : type(TYPE_INT), i32(v) { }
+            chunk_const(double v) : type(TYPE_FLOAT), f64(v) { }
+            chunk_const(chunk_const_str *str) : type(TYPE_STRING), str(str) { }
+        }; // struct variant;
+
+        struct jtable_bucket {
+            uint16_t item_count;
+            uint16_t *items;
+            int16_t jump_offset;
+
+            inline ~jtable_bucket() {
+                delete[] items;
+            }
+        }; // struct jtable_entry
+
+        struct jtable {
+            uint16_t count;
+            jtable_bucket *buckets;
+
+            inline ~jtable() {
+                delete[] buckets;
+            }
+        }; // struct jtable
+
+        struct chunk_line_info {
+            uint32_t line;
+            uint32_t instr_index;
+        };
+        
+        /*
+        ? - means variable-width
+            strings are nul-terminated
+
+        struct chunk {
+            chunk_header header;
+            instr instrs[?];
+            byte str_pool[?][?];
+            chunk_const consts[?]; (references str_pool)
+            char file_name[?];
+            const char *arg_names[?]; (references str_pool)
+            chunk_line_info line_info[?] (references str_pool)
+            char name[?];
+        };
+        */
+
+        struct chunk_header {
+            uint8_t nargs; // can be zero. me will be automatically inserted
+                           // if so.
+            uint16_t nlocals;
+            uint16_t nconsts;
+            uint32_t ninstr;
+            uint32_t line_info_count;
+
+            // these are offsets from the start of the chunk header
+            const bc::instr *instrs;
+            const char *name;
+            const chunk_const *consts;
+            const chunk_const_str *string_pool;
+            const char *file_name;
+            const char *arg_names;
+            const chunk_line_info *line_info;
+            
+            // variant *consts;
+            // std::string *strings;
+
+            // std::string *dbg_arg_names;
+            // std::string dbg_file_name;
+            // unsigned int dbg_line_count;
+            // dbg_line_info *dbg_lines;
+        };
+
+        template <typename Ta, typename Tb>
+        constexpr Tb* base_offset(const Ta *base, Tb *offset) {
+            uintptr_t ptr = ((uintptr_t)base + (uintptr_t)offset);
+            assert(ptr % alignof(Tb) == 0);
+            return (Tb *)ptr;
+        }
+
+        bool generate_bytecode(const ast::ast_root &root,
+                               std::vector<std::vector<uint8_t>> &chunk_list,
+                               parse_error *error);
+    } // namespace bc
+
+    bool compile_bytecode(std::istream &istream,
+                          std::vector<std::vector<uint8_t>> &chunk_list,
+                          parse_error *error);
+    // bool compile_luajit_text(std::istream &istream, std::ostream &ostream,
+    //                          parse_error *error,
+    //                          extra_gen_params *params = nullptr);
 } // namespace lingo

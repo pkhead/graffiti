@@ -1,243 +1,7 @@
-#include <lua.hpp>
 #include <iostream>
 #include <istream>
 #include <fstream>
-#include <sstream>
-#include <stdexcept>
 #include "lingo/lingo.hpp"
-
-constexpr const char* MT_LIST = "linear list";
-constexpr const char* MT_PROP_LIST = "property list";
-
-static int lua_load_lingo(lua_State *L, std::istream &istream, const char *chunk_name) {
-    std::stringstream ostream;
-    lingo::parse_error error;
-    if (!lingo::compile_luajit_text(istream, ostream, &error)) {
-        static char buf[256];
-        const char *fmt;
-        const char *nm = chunk_name;
-        if (chunk_name[0] == '@' || chunk_name[0] == '=') {
-            fmt = "%s:%i: %s";
-            ++nm;
-        } else if (strlen(chunk_name) >= 48) {
-            fmt = "[string \"%.45s...\"]:%i: %s";
-        } else {
-            fmt = "[string \"%s\"]:%i: %s";
-        }
-
-        snprintf(buf, 256, fmt, nm, error.pos.line, error.errmsg.c_str());
-        lua_pushstring(L, buf);
-        return LUA_ERRSYNTAX;
-    } else {
-        std::string lua_code = ostream.str();
-        return luaL_loadbuffer(L, lua_code.c_str(), lua_code.size(), chunk_name);
-    }
-}
-
-class luawrap_State {
-public:
-    lua_State *ptr;
-    inline constexpr luawrap_State(lua_State *ptr) noexcept : ptr(ptr)
-    { }
-
-    operator lua_State*() const { return ptr; }
-
-    inline ~luawrap_State() {
-        lua_close(ptr);
-    }
-};
-
-struct lua_linear_list {
-    int tref;
-    int length;
-
-    lua_linear_list(lua_State *L) {
-        lua_newtable(L);
-        tref = luaL_ref(L, LUA_REGISTRYINDEX);
-        length = 0;
-    }
-
-    void release(lua_State *L) {
-        luaL_unref(L, LUA_REGISTRYINDEX, tref);
-        tref = 0;
-        length = 0;
-    }
-
-    inline constexpr void push_table(lua_State *L) const {
-        lua_rawgeti(L, LUA_REGISTRYINDEX, tref);
-    }
-};
-
-static void set_up_globals(lua_State *L) {
-    luaL_dostring(L, R"lua(
-        lingo = {}
-        lingo.globals = {}
-        lingo.runtime = {}
-        local lruntime = lingo.runtime
-
-        local builtin_handlers = {
-            readinput = function()
-                return io.read("*l")
-            end
-        }
-        
-        function call_handler(hname, ...)
-            local h = builtin_handlers[hname]
-            if h then
-                return h(...)
-            else
-                error(("unknown handler '%s'"):format(hname), 2)
-            end
-        end
-
-        function lruntime.to_string(n)
-            if n == nil then
-                return ""
-            else
-                return tostring(n)
-            end
-        end
-
-        function lruntime.logical_and(a, b)
-            if (a ~= 0 and a ~= nil) and (b ~= 0 and b ~= nil) then
-                return 1
-            else
-                return 0
-            end
-        end
-
-        function lruntime.logical_or(a, b)
-            if (a ~= 0 and a ~= nil) or (b ~= 0 and b ~= nil) then
-                return 1
-            else
-                return 0
-            end
-        end
-
-        function lruntime.logical_not(a)
-            if not (a ~= 0 and a ~= nil) then
-                return 1
-            else
-                return 0
-            end
-        end
-
-        function lruntime.bool_to_int(v)
-            if v then
-                return 1
-            else
-                return 0
-            end
-        end
-
-        -- TODO: holes can probably exist in lingo lists so probably should use
-        -- either a userdata, or store length alongside table ... in which case
-        -- i should use a userdata anyway so that client code can't pairs
-        -- through the thing.
-        local lingo_list_mt = {}
-        lingo_list_mt.funcs = {
-            add = function(self, v)
-                rawset(self, #self+1, v)
-            end
-        }
-
-        function lingo_list_mt.__index(t,k)
-            local f = lingo_list_mt.funcs[k]
-            if f then
-                return f
-            end
-
-            if k == "length" then
-                return #t
-            end
-            
-            error("key does not exist", 2)
-        end
-
-        function lingo_list_mt.__newindex(t,k,v)
-            error("key does not exist", 2)
-        end
-
-        lingo_list_mt.__metatable = "The metatable is locked"
-
-        function lingo.list(...)
-            return setmetatable({...}, lingo_list_mt)
-        end
-    )lua");
-
-    // set up linear list metatable
-    luaL_newmetatable(L, MT_LIST);
-
-    // __gc
-    lua_pushcfunction(L, [](lua_State *L) -> int {
-        lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
-        list->release(L);
-        list->~lua_linear_list();
-        return 0;
-    });
-    lua_setfield(L, -2, "__gc");
-
-    // __index
-    lua_pushcfunction(L, [](lua_State *L) {
-        lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
-
-        if (lua_isnumber(L, 2)) {
-            int n = (int)luaL_checkinteger(L, 2) - 1;
-            if (n < 0 || n >= list->length) {
-                return luaL_error(L, "index out of range");
-            }
-
-            list->push_table(L);
-            lua_rawgeti(L, -1, n);
-            return 1;
-        }
-
-        const char *k = luaL_checkstring(L, 2);
-
-        if (!strcmp(k, "length")) {
-            lua_pushnumber(L, (lua_Number)list->length);
-            return 1;
-        }
-
-        if (!strcmp(k, "add")) {
-            lua_pushcfunction(L, [](lua_State *L) -> {
-                lua_linear_list *list = (lua_linear_list*)luaL_checkudata(L, 1, MT_LIST);
-                list->push_table(L);
-                lua_pushvalue(L, 2);
-                lua_rawseti(L, -2)
-            });
-            return 1;
-        }
-        return 0;
-    });
-
-    lua_pushstring(L, "The metatable is locked.");
-    lua_setfield(L, -2, "__metatable");
-
-    // lingo.list
-    lua_pushcfunction(L, [](lua_State *L) -> int {
-        int argn = lua_gettop(L);
-
-        lua_linear_list *list = (lua_linear_list*)lua_newuserdata(L, sizeof(lua_linear_list));
-        new(&list) lua_linear_list(L);
-        luaL_getmetatable(L, MT_LIST);
-        lua_setmetatable(L, -2);
-
-        list->push_table(L);
-        for (int i = 1; i <= argn; ++i) {
-            lua_pushvalue(L, i);
-            lua_rawseti(L, -2, i);
-        }
-        lua_pop(L, 1); // pop table
-
-        return 1;
-    });
-}
-
-static int lua_panic(lua_State *L) {
-    throw std::runtime_error(lua_tostring(L, -1));
-    return 0;
-}
 
 int lingo_compiler_test(int argc, const char *argv[]) {
     if (argc < 3) {
@@ -295,13 +59,55 @@ int lingo_compiler_test(int argc, const char *argv[]) {
     }
 
     lingo::parse_error error;
-    lingo::extra_gen_params params;
-    params.no_line_numbers = no_line_numbers;
-
-    if (!lingo::compile_luajit_text(*istream, *ostream, &error, &params)) {
+    std::vector<std::vector<uint8_t>> chunks;
+    if (!lingo::compile_bytecode(*istream, chunks, &error)) {
         std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
         return 1;
     }
+
+    if (chunks.size() == 0) {
+        std::cerr << "no chunks generated\n";
+        return 1;
+    }
+
+    const lingo::bc::chunk_header *chunk = (lingo::bc::chunk_header *)chunks[0].data();
+    const lingo::bc::chunk_const *consts = lingo::bc::base_offset(chunk, chunk->consts);
+    const lingo::bc::chunk_const_str *strpool = lingo::bc::base_offset(chunk, chunk->string_pool);
+    
+    std::cout << "CONSTS:\n";
+    for (int i = 0; i < chunk->nconsts; ++i) {
+        const lingo::bc::chunk_const *c = consts + i;
+        printf("%i - ", i);
+        switch (c->type) {
+            case lingo::bc::TYPE_INT:
+                printf("int:    %i\n", c->i32);
+                break;
+
+            case lingo::bc::TYPE_FLOAT:
+                printf("float:  %f\n", c->f64);
+                break;
+
+            case lingo::bc::TYPE_STRING: {
+                const lingo::bc::chunk_const_str *str =
+                    lingo::bc::base_offset(strpool, c->str);
+                printf("string: (%llu) %s\n", str->size, &str->first);
+                break;
+            }
+
+            case lingo::bc::TYPE_SYMBOL: {
+                const lingo::bc::chunk_const_str *str =
+                    lingo::bc::base_offset(strpool, c->str);
+                printf("symbol: (%llu) %s\n", str->size, &str->first);
+                break;
+            }
+
+            default:
+                printf("???\n");
+                break;
+        }
+    }
+
+    ostream->write((char*)chunks[0].data(), chunks[0].size() * sizeof(chunks[0].front()));
 
     // for (auto &tok : tokens) {
     //     switch (tok.type) {
@@ -354,11 +160,6 @@ int main(int argc, const char *argv[]) {
     if (argc > 1) {
         return lingo_compiler_test(argc, argv);
     }
-
-    luawrap_State L(lua_open());
-    lua_atpanic(L, lua_panic);
-    luaL_openlibs(L);
-    set_up_globals(L);
     
     {
         constexpr const char *FILE_NAME = "input.ls";
@@ -368,22 +169,23 @@ int main(int argc, const char *argv[]) {
             return 1;
         }
 
-        std::string chunk_name = std::string("@") + FILE_NAME;
-        if (lua_load_lingo(L, f, chunk_name.c_str()) != LUA_OK) {
-            std::cerr << lua_tostring(L, -1);
+        lingo::parse_error error;
+        std::vector<std::vector<uint8_t>> chunks;
+        if (!lingo::compile_bytecode(f, chunks, &error)) {
+            std::cerr << "error " << error.pos.line << ":" << error.pos.column << ": " << error.errmsg << "\n";
             return 1;
         }
-    }
 
-    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        std::cerr << lua_tostring(L, -1);
-        return 1;
-    }
+        if (chunks.size() == 0) {
+            std::cout << "no chunks generated\n";
+            return 0;
+        }
 
-    lua_getfield(L, -1, "main");
-    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
-        std::cerr << lua_tostring(L, -1);
-        return 1;
+        // std::string chunk_name = std::string("@") + FILE_NAME;
+        // if (lua_load_lingo(L, f, chunk_name.c_str()) != LUA_OK) {
+        //     std::cerr << lua_tostring(L, -1);
+        //     return 1;
+        // }
     }
 
     return 0;
